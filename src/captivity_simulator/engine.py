@@ -533,6 +533,7 @@ NIGHT_ACTION_SECRET_ITEMS = {
     "sleep": ["night_light", "pillow"],
 }
 PROGRESSIVE_SECRET_ITEMS = {"book", "switch", "music_player", "tablet"}
+MIN_INVENTORY_SECRET_ENTRIES = 5
 MAX_INVENTORY_SECRET_ENTRIES = 8
 
 
@@ -3192,8 +3193,13 @@ def _change_inventory_items(state: dict[str, Any], args: dict[str, Any], *, enab
     forbidden = _first_forbidden([secret_content]) if secret_content else ""
     if forbidden:
         return False, [f"包含禁用项：{forbidden}"]
-    if progressive_item and enabled and not bool(inventory.get(progressive_item)) and not secret_entries:
-        return False, ["赠送使用过的物品前，需要按行填写至少一条使用痕迹。"]
+    if (
+        progressive_item
+        and enabled
+        and not bool(inventory.get(progressive_item))
+        and len(secret_entries) < MIN_INVENTORY_SECRET_ENTRIES
+    ):
+        return False, [f"赠送使用过的物品前，需要按行填写至少 {MIN_INVENTORY_SECRET_ENTRIES} 条使用痕迹。"]
     if len(secret_entries) > MAX_INVENTORY_SECRET_ENTRIES:
         return False, [f"使用痕迹最多填写 {MAX_INVENTORY_SECRET_ENTRIES} 条。"]
     if any(len(entry) > 200 for entry in secret_entries) or len(secret_content) > 1000:

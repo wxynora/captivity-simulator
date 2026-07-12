@@ -81,22 +81,27 @@ class EngineTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             save_path = Path(directory) / "book.json"
             run_command("new_game route=captured_by_assistant", save_path)
-            gifted = run_command("gift_item items=book secret='第 12 页有折角\n书签停在最后一章'", save_path)
+            rejected = run_command("gift_item items=book secret='只有一条'", save_path)
+            self.assertFalse(rejected["ok"])
+            gifted = run_command(
+                "gift_item items=book secret='第 12 页有折角\n书签停在最后一章\n封底写过日期\n中间夹着旧书签\n扉页留着签名'",
+                save_path,
+            )
             self.assertTrue(gifted["ok"])
-            self.assertEqual(gifted["captor_view"]["inventory_secrets"]["book"]["entries"], ["第 12 页有折角", "书签停在最后一章"])
+            self.assertEqual(len(gifted["captor_view"]["inventory_secrets"]["book"]["entries"]), 5)
             self.assertEqual(gifted["captive_view"]["inventory_secrets"]["book"]["revealed_count"], 0)
 
             self._force_night(save_path)
             first = run_command("night_action action=read detail=inspect_margins", save_path)
             first_secret = first["captive_view"]["pending_event"]["item_secret"]
-            self.assertEqual((first_secret["sequence"], first_secret["total"]), (1, 2))
+            self.assertEqual((first_secret["sequence"], first_secret["total"]), (1, 5))
             self.assertIn("第 12 页有折角", first_secret["text"])
             run_command("ack_item_secret", save_path)
 
             self._force_night(save_path)
             second = run_command("night_action action=read detail=inspect_margins", save_path)
             second_secret = second["captive_view"]["pending_event"]["item_secret"]
-            self.assertEqual((second_secret["sequence"], second_secret["total"]), (2, 2))
+            self.assertEqual((second_secret["sequence"], second_secret["total"]), (2, 5))
             self.assertIn("书签停在最后一章", second_secret["text"])
             self.assertNotIn("第 12 页有折角", second_secret["text"])
 

@@ -486,21 +486,23 @@ const INVENTORY_OPTIONS = [
 type InventoryItemId = (typeof INVENTORY_OPTIONS)[number]["id"];
 
 const PROGRESSIVE_SECRET_ITEMS = new Set<InventoryItemId>(["book", "switch", "music_player", "tablet"]);
+const MIN_PROGRESSIVE_SECRET_ENTRIES = 5;
+const MAX_PROGRESSIVE_SECRET_ENTRIES = 8;
 const PROGRESSIVE_SECRET_COPY: Partial<Record<InventoryItemId, { label: string; placeholder: string }>> = {
   book: {
-    label: "这本书曾由你使用。逐行填写页码标记、批注或夹页痕迹；对方每次看书只会发现下一条。",
+    label: "这本书曾由你使用。逐行填写 5–8 条页码标记、批注或夹页痕迹；对方每次看书只会发现下一条。",
     placeholder: "例：第 47 页折过角，旁边留着一行批注\n例：书签停在你反复读过的那一页",
   },
   switch: {
-    label: "这台 Switch 曾由你使用。逐行填写游戏记录或账号痕迹；对方每次玩游戏只会发现下一条。",
+    label: "这台 Switch 曾由你使用。逐行填写 5–8 条游戏记录或账号痕迹；对方每次玩游戏只会发现下一条。",
     placeholder: "例：最近游玩记录停在某个存档\n例：相册里留着一张没有删掉的截图",
   },
   music_player: {
-    label: "这个播放器曾由你使用。逐行填写喜欢的歌或歌单痕迹；对方每次听音乐只会发现下一条。",
+    label: "这个播放器曾由你使用。逐行填写 5–8 条喜欢的歌或歌单痕迹；对方每次听音乐只会发现下一条。",
     placeholder: "例：最常播放的歌被单独收藏\n例：某张歌单循环过很多次",
   },
   tablet: {
-    label: "这台平板曾由你使用。逐行填写浏览或观看记录；对方每次使用只会发现下一条。",
+    label: "这台平板曾由你使用。逐行填写 5–8 条浏览或观看记录；对方每次使用只会发现下一条。",
     placeholder: "例：浏览记录停在某个页面\n例：观看历史里留下了一段未播完的视频",
   },
 };
@@ -2294,6 +2296,7 @@ function InventoryWarehouse({
   const selectedEntries = selectedSecret?.entries || [];
   const selectedTotal = selectedSecret?.total_count ?? selectedEntries.length;
   const selectedRevealed = selectedSecret?.revealed_count ?? (selectedSecret?.revealed ? selectedTotal : 0);
+  const draftEntryCount = itemSecretText.split(/\r?\n/).filter((entry) => entry.trim()).length;
 
   function handleItemAction() {
     if (!selectedItem) return;
@@ -2358,6 +2361,9 @@ function InventoryWarehouse({
                   : progressiveCopy?.placeholder || "可选：输入第一次使用时显示的内容"}
                 onChange={(event) => setItemSecretText(event.target.value)}
               />
+              {progressiveCopy ? (
+                <div className="warehouse-menu-state">已填写 {draftEntryCount} 条，需要 {MIN_PROGRESSIVE_SECRET_ENTRIES}–{MAX_PROGRESSIVE_SECRET_ENTRIES} 条</div>
+              ) : null}
             </>
           ) : null}
           {selectedActive && (selectedItem === "call_bell" ? callBellVoice?.line : selectedSecret?.content || selectedEntries.length) ? (
@@ -2380,7 +2386,10 @@ function InventoryWarehouse({
             <button
               className="btn"
               type="button"
-              disabled={disabled || (!selectedActive && (selectedItem === "call_bell" || PROGRESSIVE_SECRET_ITEMS.has(selectedItem as InventoryItemId)) && !itemSecretText.trim())}
+              disabled={disabled
+                || (!selectedActive && selectedItem === "call_bell" && !itemSecretText.trim())
+                || (!selectedActive && PROGRESSIVE_SECRET_ITEMS.has(selectedItem as InventoryItemId)
+                  && (draftEntryCount < MIN_PROGRESSIVE_SECRET_ENTRIES || draftEntryCount > MAX_PROGRESSIVE_SECRET_ENTRIES))}
               onClick={handleItemAction}
             >
               {selectedActive ? "收回" : "赠送"}
