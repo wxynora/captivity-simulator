@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 
 
 def _pending_type(payload: dict) -> str:
@@ -14,6 +15,11 @@ def _pending_type(payload: dict) -> str:
     return ""
 
 
+def _process_block(text: str) -> str:
+    match = re.match(r"^\s*【\s*过程\s*】\s*【【([\s\S]*?)】】", str(text or "").strip())
+    return str(match.group(1) or "").strip() if match else ""
+
+
 def directive_to_command(reply_text: str, payload: dict | None = None) -> str:
     text = str(reply_text or "").strip()
     match = re.match(r"^【\s*([^：:】]+?)\s*(?:[：:]\s*(.*?))?】", text, flags=re.S)
@@ -21,6 +27,7 @@ def directive_to_command(reply_text: str, payload: dict | None = None) -> str:
         return ""
     label = re.sub(r"\s+", "", match.group(1)).lower()
     value = str(match.group(2) or "").strip()
+    rest = text[match.end():].strip()
     pending_type = _pending_type(payload or {})
 
     direct = {
@@ -28,9 +35,6 @@ def directive_to_command(reply_text: str, payload: dict | None = None) -> str:
         "安排": "plan_day",
         "反应": "respond_action",
         "行动反应": "respond_action",
-        "过程心情": "submit_process_reaction",
-        "过程反应": "submit_process_reaction",
-        "抓回经过": "submit_recapture_process",
         "夜间行动": "night_action",
         "查看监控": "view_monitor",
         "重新立规矩": "set_recapture_rules",
@@ -42,9 +46,17 @@ def directive_to_command(reply_text: str, payload: dict | None = None) -> str:
         "确认铃声": "ack_bell_voice",
         "确认彩蛋": "ack_item_secret",
     }
+    if label in {"过程心情", "过程反应"}:
+        process = _process_block(rest)
+        return f"submit_process_reaction {value} process={shlex.quote(process)}" if value and process else ""
+    if label == "抓回经过":
+        process = _process_block(rest)
+        return f"submit_recapture_process {value} || process={shlex.quote(process)}" if value and process else ""
     if label in {"过程", "描述", "提交"}:
-        action = "submit_process_reaction" if pending_type == "process_reaction_write" else "submit_process"
-        return f"{action} {value}".strip()
+        if pending_type == "process_reaction_write":
+            return ""
+        process = _process_block(text)
+        return f"submit_process {process}" if process else ""
     if label == "心情":
         action = "respond_action" if pending_type == "action_response" else "choose_mood"
         return f"{action} {value}".strip()
@@ -53,10 +65,13 @@ def directive_to_command(reply_text: str, payload: dict | None = None) -> str:
             return f"resolve_escape_choice {value}".strip()
         if pending_type == "monitor_gate":
             return f"view_monitor {value}".strip()
+        if pending_type == "bell_response_choice":
+            if value in {"不过去", "不去", "skip", "none"}:
+                return "respond_bell choice=skip"
+            if value in {"过去", "去", "go"}:
+                process = _process_block(rest)
+                return f"respond_bell choice=go process={shlex.quote(process)}" if process else ""
+            return ""
         return f"monitor_action {value}".strip()
-    if label == "过去":
-        return f"respond_bell choice=go process={value}".strip()
-    if label in {"不过去", "不去"}:
-        return "respond_bell choice=skip"
     action = direct.get(label)
     return f"{action} {value}".strip() if action else ""

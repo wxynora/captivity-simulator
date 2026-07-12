@@ -9,12 +9,12 @@ from .engine import ACTION_CONTENTS, ACTION_LABELS, TOOL_LABELS, TRAINING_CONTEN
 PENDING_RULES = {
     "day_plan_choice": "一次安排三个白天行动。第一行使用【今日安排：...】，三段用 || 分隔。",
     "action_response": "回应当前行动并选择心情。第一行使用【反应：response=accept mood=害羞 line=可选台词】。",
-    "process_write": "写下当前事件的完整经过。第一行使用【过程：完整经过】。",
-    "process_reaction_write": "一次提交自己的回应、心情和完整经过。第一行使用【过程心情：response=accept mood=害羞 line=可选台词 process=完整经过】。",
+    "process_write": "当前事件已经进入具体经过。回复格式固定为【过程】换行【【完整正文】】。",
+    "process_reaction_write": "一次提交自己的回应、心情和完整经过。先写【过程心情：response=accept mood=害羞 line=可选台词】，再写【过程】换行【【完整正文】】。",
     "reaction_choice": "选择过程结束后的心情。第一行使用【心情：害羞 可选台词】。",
     "advance_action": "当前行动已经保存，等待另一方推进。",
     "night_action_choice": "选择夜间行动。第一行使用【夜间行动：sleep】。",
-    "bell_response_choice": "语音铃已经响起；当前事件 bell_voice.line 是本次实际播放的预录台词，每次按铃都会随事件提供。第一行使用【不过去】或【过去：完整经过】。",
+    "bell_response_choice": "语音铃已经响起；当前事件 bell_voice.line 是本次实际播放的预录台词，每次按铃都会随事件提供。若不过去使用【选择：不过去】；若过去，先写【选择：过去】，再写【过程】换行【【完整正文】】。",
     "bell_voice_reveal": "当前事件 bell_voice.line 是本次实际播放的预录台词。确认听清后，第一行使用【确认铃声】。",
     "item_secret_reveal": "确认看完本次发现的物品痕迹。第一行使用【确认彩蛋】。",
     "monitor_gate": "选择是否查看监控。第一行使用【选择：none】或【查看监控：full】。",
@@ -100,6 +100,9 @@ def build_assistant_prompt(payload: dict[str, Any], config: dict[str, Any], mess
     if event_lines:
         parts.extend(["", "【当前事件素材】", *event_lines])
     rule = PENDING_RULES.get(pending_type)
+    event = pending.get("event") if isinstance(pending.get("event"), dict) else {}
+    if pending_type == "process_write" and str(event.get("action") or "") == "escape_choice" and "recapture" in (event.get("tags") or []):
+        rule = "先写【抓回经过：rules=double_lock,key_isolation】，再写【过程】换行【【完整抓回经过】】；必须选择一至三条新规矩。"
     if rule:
         parts.extend(["", "【当前待办】", rule])
     available_actions = [str(item).strip() for item in pending.get("available_actions") or [] if str(item).strip()]

@@ -41,8 +41,20 @@ class EngineTest(unittest.TestCase):
         self.assertEqual(directive_to_command("【选择：escape】", payload), "resolve_escape_choice escape")
         process_payload = {"state": {"pending_event": {"type": "process_reaction_write"}}}
         self.assertEqual(
-            directive_to_command("【过程：response=accept mood=平静 process=正文】", process_payload),
-            "submit_process_reaction response=accept mood=平静 process=正文",
+            directive_to_command("【过程心情：response=accept mood=平静】\n【过程】\n【【正文】】", process_payload),
+            "submit_process_reaction response=accept mood=平静 process='正文'",
+        )
+        self.assertEqual(directive_to_command("【过程心情：response=accept mood=平静】\n正文", process_payload), "")
+        write_payload = {"state": {"pending_event": {"type": "process_write"}}}
+        self.assertEqual(directive_to_command("【过程】\n【【多段正文】】", write_payload), "submit_process 多段正文")
+        self.assertEqual(
+            directive_to_command("【抓回经过：rules=double_lock,key_isolation】\n【过程】\n【【抓回正文】】", write_payload),
+            "submit_recapture_process rules=double_lock,key_isolation || process='抓回正文'",
+        )
+        bell_payload = {"state": {"pending_event": {"type": "bell_response_choice"}}}
+        self.assertEqual(
+            directive_to_command("【选择：过去】\n【过程】\n【【过去后的正文】】", bell_payload),
+            "respond_bell choice=go process='过去后的正文'",
         )
 
     def test_voice_bell_replays_line_and_keeps_it_in_assistant_context(self) -> None:

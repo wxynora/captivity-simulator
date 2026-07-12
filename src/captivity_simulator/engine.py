@@ -1955,7 +1955,9 @@ def _submit_recapture_process(state: dict[str, Any], args: dict[str, Any]) -> tu
     rules_match = re.search(r"\brules=([^\s|｜]+)", raw)
     process_match = re.search(r"\bprocess=(.*)", raw, flags=re.S)
     rules = _split_csv(rules_match.group(1) if rules_match else args.get("rules"))
-    process_text = str(process_match.group(1) if process_match else args.get("process") or args.get("text") or "").strip()
+    process_text = str(args.get("process") or args.get("text") or "").strip()
+    if not process_text and process_match:
+        process_text = process_match.group(1).strip()
     if not process_text:
         return False, ["抓回经过正文不能为空。"]
     if not 1 <= len(rules) <= 3:
@@ -2055,7 +2057,7 @@ def _parse_process_reaction_args(args: dict[str, Any]) -> tuple[str, str, str, s
             mood = mood_match.group(1).strip()
         if line_match and not line:
             line = line_match.group(1).strip()
-        if process_match:
+        if process_match and not text:
             text = process_match.group(1).strip()
         if (not mood or not text) and ("|" in raw or "｜" in raw):
             pieces = [piece.strip() for piece in re.split(r"[|｜]", raw, maxsplit=3)]
@@ -3354,11 +3356,11 @@ def _event_draft(
 def _new_pending(state: dict[str, Any], pending_type: str, event: dict[str, Any], actor: str) -> dict[str, Any]:
     directives = {
         "action_response": "【反应：response=accept mood=害羞 line=可选台词】",
-        "process_write": "【过程：过程内容】",
-        "process_reaction_write": "【过程心情：response=accept mood=害羞 line=可选台词 process=过程内容】",
+        "process_write": "【过程】\n【【过程正文】】",
+        "process_reaction_write": "【过程心情：response=accept mood=害羞 line=可选台词】\n【过程】\n【【过程正文】】",
         "reaction_choice": "【心情：害羞 可选台词】",
         "bell_voice_reveal": "【确认铃声】",
-        "bell_response_choice": "【选择：不过去】或【过去：完整亲密互动过程】",
+        "bell_response_choice": "【选择：不过去】或【选择：过去】\n【过程】\n【【完整亲密互动过程】】",
         "item_secret_reveal": "【确认彩蛋】",
         "monitor_gate": "【选择：none】 或 【查看监控：full】",
         "monitor_handle": "【选择：silent|review_later|intervene intent=catch modifiers=training,sex training_contents=obedience_commands tools=collar line=可选台词】",
@@ -3375,6 +3377,8 @@ def _new_pending(state: dict[str, Any], pending_type: str, event: dict[str, Any]
         "monitor_handle": "waiting_monitor_handle",
     }
     directive = directives.get(pending_type, "monitor_action")
+    if pending_type == "process_write" and str(event.get("action") or "") == "escape_choice" and "recapture" in (event.get("tags") or []):
+        directive = "【抓回经过：rules=double_lock,key_isolation】\n【过程】\n【【完整抓回经过】】"
     return {
         "id": f"pending-{secrets.token_hex(4)}",
         "type": pending_type,
