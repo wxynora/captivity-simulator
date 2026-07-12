@@ -4274,7 +4274,7 @@ def _result(state: dict[str, Any], lines: list[str], *, command: str, ok: bool =
             "choose_recapture_followup action=punishment intensity=medium modifiers=training,sex training_contents=impact_play tools=whip line=...",
             "build_ending_seed",
             "set_config book=true switch=true notebook=true music_player=true tablet=true night_light=true pillow=true",
-            "gift_item items=book secret=可选隐藏彩蛋",
+            "gift_item items=book book_title=书名 secret=五至八条使用痕迹",
             "revoke_item items=book",
             "export_log",
         ],

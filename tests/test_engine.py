@@ -48,6 +48,10 @@ class EngineTest(unittest.TestCase):
         write_payload = {"state": {"pending_event": {"type": "process_write"}}}
         self.assertEqual(directive_to_command("【过程】\n【【多段正文】】", write_payload), "submit_process 多段正文")
         self.assertEqual(
+            directive_to_command("【赠送物品：items=book book_title='夜航船' secret='痕迹一 || 痕迹二'】", write_payload),
+            "gift_item items=book book_title='夜航船' secret='痕迹一 || 痕迹二'",
+        )
+        self.assertEqual(
             directive_to_command("【抓回经过：rules=double_lock,key_isolation】\n【过程】\n【【抓回正文】】", write_payload),
             "submit_recapture_process rules=double_lock,key_isolation || process='抓回正文'",
         )
