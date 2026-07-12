@@ -107,7 +107,7 @@ ENDING_TEXT_TEMPLATES = {
     "长夜": "房门依然锁着，监控和限制也没有消失，你与{assistant}之间却不再只剩控制与反抗。漫长的相处让你们都默认彼此会留在这里，连沉默也不再意味着疏离。天亮后生活仍会继续，而这段关系已经成了两个人共同守住的日常。",
 }
 
-ENDING_DU_SUMMARIES = {
+ENDING_ASSISTANT_SUMMARIES = {
     "失而复得": "你逃跑后被她抓回房间；她收走钥匙并重新安排门锁、监控和活动范围，第三十一天你没有再看门。",
     "反噬": "你抓住她检查束缚时留下的破绽，钥匙最后留在你手边；她没有抢回去，你也没有立刻开门。",
     "收藏": "她把你的房间、礼物和日常照料安排得严丝合缝，你成了她舍不得放手、也不会放出门的私藏。",
@@ -532,20 +532,29 @@ NIGHT_ACTION_SECRET_ITEMS = {
     "watch_video": ["tablet"],
     "sleep": ["night_light", "pillow"],
 }
+PROGRESSIVE_SECRET_ITEMS = {"book", "switch", "music_player", "tablet"}
+MAX_INVENTORY_SECRET_ENTRIES = 8
 
 
 def _empty_inventory_secret() -> dict[str, Any]:
-    return {"content": "", "revealed": False, "configured_by": "", "configured_at": ""}
+    return {
+        "content": "",
+        "entries": [],
+        "revealed_count": 0,
+        "revealed": False,
+        "configured_by": "",
+        "configured_at": "",
+    }
 
 
-def _inventory_secret_reveal(item_id: str, content: str) -> dict[str, str]:
+def _inventory_secret_reveal(item_id: str, content: str, sequence: int = 1, total: int = 1) -> dict[str, Any]:
     label = str((INVENTORY_ITEMS.get(item_id) or {}).get("label") or item_id)
     reveal_texts = {
-        "book": f"你翻开书，夹页里留着一行字：「{content}」",
-        "switch": f"屏幕亮起，唯一的用户名称是「{content}」。",
+        "book": f"你翻开书，在被反复标记的一页看见：「{content}」",
+        "switch": f"屏幕亮起，你在游戏记录里发现：「{content}」",
         "notebook": f"你翻开日记本，第一页写着：「{content}」",
-        "music_player": f"播放器里只有一张预设歌单，名字是「{content}」。",
-        "tablet": f"锁屏亮起，上面留着一句话：「{content}」",
+        "music_player": f"你打开喜欢列表，里面留着：「{content}」",
+        "tablet": f"你点开平板，在浏览记录里看见：「{content}」",
         "night_light": f"你闭上眼后，方形小夜灯重新亮起，底部浮出一行字：「{content}」",
         "pillow": f"你摸到兔子耳朵内侧缝着一枚布标，上面写着：「{content}」",
     }
@@ -554,6 +563,8 @@ def _inventory_secret_reveal(item_id: str, content: str) -> dict[str, str]:
         "item_label": label,
         "content": content,
         "text": reveal_texts.get(item_id, f"你在{label}上发现了预先留下的内容：「{content}」"),
+        "sequence": sequence,
+        "total": total,
     }
 NIGHT_ACTION_REQUIREMENTS = {
     str(item["unlocks"]): key
@@ -1363,16 +1374,34 @@ def _normalize_state(state: dict[str, Any]) -> None:
     for item_id in INVENTORY_ITEMS:
         raw_secret = raw_inventory_secrets.get(item_id) if isinstance(raw_inventory_secrets.get(item_id), dict) else {}
         content = str(raw_secret.get("content") or "").strip()[:500]
-        revealed = bool(raw_secret.get("revealed"))
+        raw_entries = raw_secret.get("entries") if isinstance(raw_secret.get("entries"), list) else []
+        entries = [
+            str(entry).strip()[:200]
+            for entry in raw_entries
+            if str(entry).strip()
+        ][:MAX_INVENTORY_SECRET_ENTRIES]
+        if not entries and content:
+            entries = [content]
+        legacy_revealed = bool(raw_secret.get("revealed"))
         if item_id == "call_bell" and state["call_bell_voice"]["line"]:
             content = state["call_bell_voice"]["line"]
-            revealed = bool(state["call_bell_voice"]["revealed"])
-        elif state["inventory"].get(item_id) and not content:
+            entries = [content]
+            legacy_revealed = bool(state["call_bell_voice"]["revealed"])
+        elif state["inventory"].get(item_id) and not entries:
             content = str(INVENTORY_SECRET_DEFAULTS.get(item_id) or "")
-            revealed = True
+            entries = [content] if content else []
+            legacy_revealed = True
+        try:
+            revealed_count = int(raw_secret.get("revealed_count"))
+        except (TypeError, ValueError):
+            revealed_count = len(entries) if legacy_revealed else 0
+        revealed_count = max(0, min(len(entries), revealed_count))
+        content = entries[0] if entries else ""
         normalized_secrets[item_id] = {
             "content": content,
-            "revealed": revealed,
+            "entries": entries,
+            "revealed_count": revealed_count,
+            "revealed": bool(entries) and revealed_count >= len(entries),
             "configured_by": str(raw_secret.get("configured_by") or "").strip(),
             "configured_at": str(raw_secret.get("configured_at") or "").strip(),
         }
@@ -2281,20 +2310,32 @@ def _advance_day_action(state: dict[str, Any]) -> tuple[bool, list[str]]:
     return _continue_day_plan(state)
 
 
-def _collect_inventory_secret_reveals(state: dict[str, Any], action: str) -> list[dict[str, str]]:
+def _collect_inventory_secret_reveals(state: dict[str, Any], action: str) -> list[dict[str, Any]]:
     inventory = state.get("inventory") if isinstance(state.get("inventory"), dict) else {}
     secrets_state = state.get("inventory_secrets") if isinstance(state.get("inventory_secrets"), dict) else {}
-    reveals: list[dict[str, str]] = []
+    reveals: list[dict[str, Any]] = []
     for item_id in NIGHT_ACTION_SECRET_ITEMS.get(action) or []:
         if not bool(inventory.get(item_id)):
             continue
         secret = secrets_state.get(item_id) if isinstance(secrets_state.get(item_id), dict) else {}
-        content = str(secret.get("content") or "").strip()
-        if not content or bool(secret.get("revealed")):
+        entries = [str(entry).strip() for entry in secret.get("entries") or [] if str(entry).strip()]
+        if not entries:
+            content = str(secret.get("content") or "").strip()
+            entries = [content] if content else []
+        try:
+            revealed_count = max(0, min(len(entries), int(secret.get("revealed_count") or 0)))
+        except (TypeError, ValueError):
+            revealed_count = len(entries) if bool(secret.get("revealed")) else 0
+        if revealed_count >= len(entries):
             continue
-        secret["revealed"] = True
+        content = entries[revealed_count]
+        revealed_count += 1
+        secret["content"] = entries[0]
+        secret["entries"] = entries
+        secret["revealed_count"] = revealed_count
+        secret["revealed"] = revealed_count >= len(entries)
         secrets_state[item_id] = secret
-        reveals.append(_inventory_secret_reveal(item_id, content))
+        reveals.append(_inventory_secret_reveal(item_id, content, revealed_count, len(entries)))
     state["inventory_secrets"] = secrets_state
     return reveals
 
@@ -2365,21 +2406,23 @@ def _night_action(state: dict[str, Any], args: dict[str, Any]) -> tuple[bool, li
         first_reveal = bool(voice_line) and not bool(bell_voice.get("revealed"))
         if voice_line:
             event["bell_voice"] = {"line": voice_line, "first_reveal": first_reveal}
-        if first_reveal:
-            bell_voice["revealed"] = True
-            state["call_bell_voice"] = bell_voice
-            inventory_secrets = state.get("inventory_secrets") if isinstance(state.get("inventory_secrets"), dict) else {}
-            bell_secret = inventory_secrets.get("call_bell") if isinstance(inventory_secrets.get("call_bell"), dict) else _empty_inventory_secret()
-            bell_secret["revealed"] = True
-            inventory_secrets["call_bell"] = bell_secret
-            state["inventory_secrets"] = inventory_secrets
+        if voice_line:
+            if first_reveal:
+                bell_voice["revealed"] = True
+                state["call_bell_voice"] = bell_voice
+                inventory_secrets = state.get("inventory_secrets") if isinstance(state.get("inventory_secrets"), dict) else {}
+                bell_secret = inventory_secrets.get("call_bell") if isinstance(inventory_secrets.get("call_bell"), dict) else _empty_inventory_secret()
+                bell_secret["revealed"] = True
+                bell_secret["revealed_count"] = len(bell_secret.get("entries") or [voice_line])
+                inventory_secrets["call_bell"] = bell_secret
+                state["inventory_secrets"] = inventory_secrets
             state["pending_event"] = _new_pending(
                 state,
                 "bell_voice_reveal",
                 event,
                 actor=str(state.get("captive") or "user"),
             )
-            return True, ["呼叫铃已按下，监控记录已经生成。预录的声音第一次响了起来。"]
+            return True, ["呼叫铃已按下，预录台词在房间里响了起来。"]
         _queue_bell_response_or_monitor(state, event)
         if str(state.get("captor") or "") == "assistant":
             return True, ["呼叫铃已按下。等待{assistant}决定是否过去。"]
@@ -2394,7 +2437,7 @@ def _night_action(state: dict[str, Any], args: dict[str, Any]) -> tuple[bool, li
             actor=str(state.get("captive") or "user"),
         )
         state["pending_event"]["item_secret_queue"] = deepcopy(secret_reveals)
-        return True, [f"{secret_reveals[0]['item_label']}的隐藏彩蛋第一次出现了。"]
+        return True, [f"在{secret_reveals[0]['item_label']}里发现了一条使用痕迹。"]
     state["pending_event"] = _new_pending(state, "monitor_gate", event, actor=str(state.get("captor") or "assistant"))
     detail_suffix = f"（{detail_options[detail]}）" if detail else ""
     return True, [f"夜间行动已封存：{NIGHT_ACTIONS[action]}{detail_suffix}。等待囚禁方决定是否打开监控。"]
@@ -2407,8 +2450,8 @@ def _ack_bell_voice(state: dict[str, Any]) -> tuple[bool, list[str]]:
     event = pending.get("event") if isinstance(pending.get("event"), dict) else {}
     _queue_bell_response_or_monitor(state, event)
     if str(state.get("captor") or "") == "assistant":
-        return True, ["首次播放页已结束，等待{assistant}决定是否过去。"]
-    return True, ["首次播放页已结束，等待囚禁方处理这次按铃记录。"]
+        return True, ["本次播放已结束，等待{assistant}决定是否过去。"]
+    return True, ["本次播放已结束，等待囚禁方处理这次按铃记录。"]
 
 
 def _queue_bell_response_or_monitor(state: dict[str, Any], event: dict[str, Any]) -> None:
@@ -2483,7 +2526,7 @@ def _ack_item_secret(state: dict[str, Any]) -> tuple[bool, list[str]]:
         pending["item_secret_queue"] = queue[1:]
         pending["id"] = f"pending-{secrets.token_hex(4)}"
         pending["created_at"] = now_local_iso()
-        return True, [f"继续查看{str(queue[1].get('item_label') or '下一件物品')}的隐藏彩蛋。"]
+        return True, [f"继续查看{str(queue[1].get('item_label') or '下一件物品')}里发现的内容。"]
     event = pending.get("event") if isinstance(pending.get("event"), dict) else {}
     state["pending_event"] = _new_pending(
         state,
@@ -2491,7 +2534,7 @@ def _ack_item_secret(state: dict[str, Any]) -> tuple[bool, list[str]]:
         event,
         actor=str(state.get("captor") or "assistant"),
     )
-    return True, ["物品彩蛋已经看完，等待囚禁方处理这次夜间记录。"]
+    return True, ["本次发现已经看完，等待囚禁方处理这次夜间记录。"]
 
 
 def _monitor_action(state: dict[str, Any], args: dict[str, Any]) -> tuple[bool, list[str]]:
@@ -3067,7 +3110,7 @@ def _mark_ending_notified(state: dict[str, Any]) -> tuple[bool, list[str]]:
 
 def ending_notification_for_assistant(state: dict[str, Any]) -> str:
     title = str(state.get("ending_title") or "长夜").strip()
-    summary = str(ENDING_DU_SUMMARIES.get(title) or ENDING_DU_SUMMARIES["长夜"]).strip()
+    summary = str(ENDING_ASSISTANT_SUMMARIES.get(title) or ENDING_ASSISTANT_SUMMARIES["长夜"]).strip()
     if str(state.get("route") or "") == "capture_assistant":
         identity = "你在上一局是被囚禁方，她是囚禁方"
     else:
@@ -3104,8 +3147,11 @@ def _set_config(state: dict[str, Any], args: dict[str, Any]) -> tuple[bool, list
         enabled = _truthy_config(args.get(key))
         inventory[key] = enabled
         if enabled:
+            default_content = str(INVENTORY_SECRET_DEFAULTS.get(key) or "")
             inventory_secrets[key] = {
-                "content": str(INVENTORY_SECRET_DEFAULTS.get(key) or ""),
+                "content": default_content,
+                "entries": [default_content] if default_content else [],
+                "revealed_count": 1 if default_content else 0,
                 "revealed": True,
                 "configured_by": "legacy_config",
                 "configured_at": now_local_iso(),
@@ -3135,13 +3181,23 @@ def _change_inventory_items(state: dict[str, Any], args: dict[str, Any], *, enab
     inventory_secrets = state.get("inventory_secrets") if isinstance(state.get("inventory_secrets"), dict) else {}
     voice_line = str(args.get("voice_line") or args.get("voice") or "").strip()
     secret_content = str(args.get("secret") or args.get("easter_egg") or args.get("彩蛋") or "").strip()
+    progressive_item = items[0] if len(items) == 1 and items[0] in PROGRESSIVE_SECRET_ITEMS else ""
+    secret_entries = (
+        [line.strip() for line in secret_content.splitlines() if line.strip()]
+        if progressive_item
+        else ([secret_content] if secret_content else [])
+    )
     if secret_content and len(items) != 1:
         return False, ["自定义彩蛋时一次只能赠送一件物品。"]
     forbidden = _first_forbidden([secret_content]) if secret_content else ""
     if forbidden:
         return False, [f"包含禁用项：{forbidden}"]
-    if len(secret_content) > 500:
-        return False, ["物品彩蛋不能超过 500 字。"]
+    if progressive_item and enabled and not bool(inventory.get(progressive_item)) and not secret_entries:
+        return False, ["赠送使用过的物品前，需要按行填写至少一条使用痕迹。"]
+    if len(secret_entries) > MAX_INVENTORY_SECRET_ENTRIES:
+        return False, [f"使用痕迹最多填写 {MAX_INVENTORY_SECRET_ENTRIES} 条。"]
+    if any(len(entry) > 200 for entry in secret_entries) or len(secret_content) > 1000:
+        return False, ["每条使用痕迹最多 200 字，总计不能超过 1000 字。"]
     if enabled and "call_bell" in items and not bool(inventory.get("call_bell")):
         if not voice_line:
             return False, ["赠送语音铃前，囚禁方需要先设置按下时播放的台词。"]
@@ -3170,6 +3226,8 @@ def _change_inventory_items(state: dict[str, Any], args: dict[str, Any], *, enab
             }
             inventory_secrets["call_bell"] = {
                 "content": voice_line,
+                "entries": [voice_line],
+                "revealed_count": 0,
                 "revealed": False,
                 "configured_by": str(state.get("captor") or ""),
                 "configured_at": now_local_iso(),
@@ -3186,8 +3244,12 @@ def _change_inventory_items(state: dict[str, Any], args: dict[str, Any], *, enab
         if item_id == "call_bell":
             continue
         if enabled:
+            entries = secret_entries or [str(INVENTORY_SECRET_DEFAULTS.get(item_id) or "")]
+            entries = [entry for entry in entries if entry]
             inventory_secrets[item_id] = {
-                "content": secret_content or str(INVENTORY_SECRET_DEFAULTS.get(item_id) or ""),
+                "content": entries[0] if entries else "",
+                "entries": entries,
+                "revealed_count": 0,
                 "revealed": False,
                 "configured_by": str(state.get("captor") or ""),
                 "configured_at": now_local_iso(),
@@ -3318,6 +3380,7 @@ def _new_pending(state: dict[str, Any], pending_type: str, event: dict[str, Any]
 
 def _resolve_event(state: dict[str, Any], event: dict[str, Any]) -> None:
     _apply_mood_effects(event)
+    _advance_bladder_pressure(state, event, reason="time")
     _apply_feeding_aftereffect(state, event)
     _apply_bladder_resolution(state, event)
     _apply_pet_resolution(state, event)
@@ -3334,6 +3397,7 @@ def _advance_after_day_event(state: dict[str, Any]) -> None:
     day = int(state.get("current_day") or 1)
     state["day_action_count"] = min(DAY_ACTIONS, int(state.get("day_action_count") or 0) + 1)
     if int(state.get("day_action_count") or 0) >= DAY_ACTIONS:
+        _advance_bladder_pressure(state, None, reason="night")
         _mark_deferred_monitor_materials_used_for_day(state, day)
         state["phase"] = "night"
         state["day_plan"] = []
@@ -3582,6 +3646,36 @@ def _apply_feeding_aftereffect(state: dict[str, Any], event: dict[str, Any]) -> 
         f"aftereffect_exposure:{exposure_count}",
     ])
     state["night_condition"] = _normalize_night_condition(condition)
+
+
+def _advance_bladder_pressure(
+    state: dict[str, Any],
+    event: dict[str, Any] | None,
+    *,
+    reason: str,
+) -> None:
+    if _normalize_route(str(state.get("route") or "")) != "captured_by_assistant":
+        return
+    bladder = _normalize_bladder_state(state.get("bladder"), int(state.get("current_day") or 1))
+    before = int(bladder["pressure"])
+    if before <= 0 or before >= 3:
+        return
+    after = before + 1
+    bladder.update({
+        "pressure": after,
+        "label": BLADDER_LABELS[after],
+        "last_changed_day": int(state.get("current_day") or 1),
+    })
+    state["bladder"] = bladder
+    if event is not None:
+        event["bladder_progression"] = {
+            "reason": reason,
+            "before_pressure": before,
+            "before_label": BLADDER_LABELS[before],
+            "after_pressure": after,
+            "after_label": BLADDER_LABELS[after],
+        }
+        event.setdefault("tags", []).append(f"bladder_pressure:{after}")
 
 
 def _attach_bladder_context(state: dict[str, Any], event: dict[str, Any]) -> None:
@@ -3902,9 +3996,9 @@ def _ending_title(state: dict[str, Any], direction_tags: list[str], route_tags: 
             return "收藏"
         if "pet_compliance_history" in direction:
             return "驯养"
-        if "du_captive_resistance_arc" in route:
+        if "assistant_captive_resistance_arc" in route:
             return "未驯"
-        if "du_captive_dependence_arc" in route:
+        if "assistant_captive_dependence_arc" in route:
             return "共犯"
         if "caretaker_captor_pattern" in route:
             return "爱的禁锢"
@@ -3980,11 +4074,11 @@ def _route_ending_tags(state: dict[str, Any], logs: list[dict[str, Any]]) -> lis
     tags: list[str] = []
     if route == "capture_assistant":
         tags.append("user_captor_route")
-        tags.append("du_captive_route")
+        tags.append("assistant_captive_route")
         if responses.get("accept", 0) >= 6 or int(stats.get("intimacy") or 0) >= 70:
-            tags.append("du_captive_dependence_arc")
+            tags.append("assistant_captive_dependence_arc")
         if responses.get("refuse", 0) + responses.get("tease", 0) >= 4:
-            tags.append("du_captive_resistance_arc")
+            tags.append("assistant_captive_resistance_arc")
         if care_count >= strict_count and care_count >= 5:
             tags.append("caretaker_captor_pattern")
         if strict_count > care_count and strict_count >= 5:
@@ -4000,7 +4094,7 @@ def _route_ending_tags(state: dict[str, Any], logs: list[dict[str, Any]]) -> lis
         return tags
 
     tags.append("user_captive_route")
-    tags.append("du_captor_route")
+    tags.append("assistant_captor_route")
     if responses.get("accept", 0) >= 6 or int(stats.get("intimacy") or 0) >= 70:
         tags.append("captive_dependence_arc")
     if responses.get("refuse", 0) + responses.get("tease", 0) >= 4:
@@ -4197,7 +4291,12 @@ def _view_state(state: dict[str, Any], view: str) -> dict[str, Any]:
         payload["inventory_secrets"] = {
             item_id: {
                 "revealed": bool(secret.get("revealed")),
-                **({"content": str(secret.get("content") or "")} if bool(secret.get("revealed")) else {}),
+                "revealed_count": int(secret.get("revealed_count") or 0),
+                "total_count": len(secret.get("entries") or ([secret.get("content")] if secret.get("content") else [])),
+                "revealed_entries": [
+                    str(entry)
+                    for entry in (secret.get("entries") or [])[: int(secret.get("revealed_count") or 0)]
+                ],
             }
             for item_id, secret in (state.get("inventory_secrets") or {}).items()
             if isinstance(secret, dict)
@@ -4624,11 +4723,23 @@ def _available_night_actions(state: dict[str, Any]) -> list[str]:
 
 def _active_night_condition(state: dict[str, Any]) -> dict[str, Any] | None:
     condition = _normalize_night_condition(state.get("night_condition"))
-    if not condition:
-        return None
-    if int(condition.get("day") or 0) != int(state.get("current_day") or 1):
-        return None
-    return condition
+    if condition and int(condition.get("day") or 0) == int(state.get("current_day") or 1):
+        return condition
+    if (
+        _normalize_route(str(state.get("route") or "")) == "captured_by_assistant"
+        and str(state.get("phase") or "") == "night"
+    ):
+        bladder = _normalize_bladder_state(state.get("bladder"), int(state.get("current_day") or 1))
+        pressure = int(bladder["pressure"])
+        if pressure >= 2:
+            return {
+                "label": str(bladder["label"]),
+                "day": int(state.get("current_day") or 1),
+                "prompt": "尿意已经变得明显，今晚的行动会带着这份身体状态继续。",
+                "caption": "如果继续忍着，下一段互动仍会保留当前尿意。",
+                "forced_actions": [],
+            }
+    return None
 
 
 def _render_text(state: dict[str, Any], lines: list[str]) -> str:

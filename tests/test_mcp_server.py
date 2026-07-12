@@ -40,7 +40,29 @@ class McpServerTest(unittest.TestCase):
         result = response["result"]
         self.assertTrue(result["structuredContent"]["ok"])
         self.assertEqual(result["structuredContent"]["state"]["route"], "captured_by_assistant")
+        self.assertEqual(result["structuredContent"]["state"]["viewer"], "captor")
+        self.assertIn("captor_view", result["structuredContent"])
+        self.assertNotIn("captive_view", result["structuredContent"])
         self.assertTrue(result["content"][0]["text"])
+
+    def test_mcp_projects_assistant_captive_view_on_captor_route(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "captivity_simulator.mcp_server._save_path",
+            side_effect=lambda save_id: Path(directory) / f"{save_id}.json",
+        ):
+            response = handle_request({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {
+                    "name": TOOL_NAME,
+                    "arguments": {"command": "new_game route=capture_assistant", "save_id": "captor-route"},
+                },
+            })
+        payload = response["result"]["structuredContent"]
+        self.assertEqual(payload["state"]["viewer"], "captive")
+        self.assertIn("captive_view", payload)
+        self.assertNotIn("captor_view", payload)
 
     def test_reads_default_save_resource(self) -> None:
         with tempfile.TemporaryDirectory() as directory, patch(

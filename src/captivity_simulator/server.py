@@ -9,6 +9,7 @@ from .adapter import AdapterError, request_assistant
 from .configuration import load_config, render_placeholders
 from .engine import run_command
 from .prompts import build_assistant_prompt
+from .projection import project_payload
 from .protocol import directive_to_command
 from .settings import DATA_DIR, PROJECT_ROOT
 
@@ -46,7 +47,8 @@ def create_app() -> Flask:
         body = request.get_json(silent=True) or {}
         config = load_config()
         result = run_command(str(body.get("command") or "status"), save_path=_save_path(str(body.get("save_id") or "default")))
-        return jsonify(_configured_result(result, config)), 200 if result.get("ok") else 400
+        projected = project_payload(result, "user")
+        return jsonify(_configured_result(projected, config)), 200 if result.get("ok") else 400
 
     @app.post("/api/game/sync-assistant")
     def sync_assistant():
@@ -58,17 +60,14 @@ def create_app() -> Flask:
         try:
             reply_text = request_assistant(prompt, config)
         except AdapterError as exc:
-            response = _configured_result(payload, config)
-            response.update({"ok": False, "error": str(exc), "prompt": prompt, "sync_result": "adapter_required"})
+            response = _configured_result(project_payload(payload, "user"), config)
+            response.update({"ok": False, "error": str(exc), "sync_result": "adapter_required"})
             return jsonify(response), 409
         command = directive_to_command(reply_text, payload)
         result = run_command(command, save_path=_save_path(save_id)) if command else payload
-        response = _configured_result(result, config)
+        response = _configured_result(project_payload(result, "user"), config)
         response.update({
-            "reply_text": render_placeholders(reply_text, config),
-            "reply_preview": render_placeholders(reply_text[:240], config),
             "sync_result": "applied" if command and result.get("ok") else "no_directive",
-            "prompt": prompt if bool(body.get("include_prompt")) else "",
         })
         return jsonify(response), 200 if response.get("ok") else 400
 

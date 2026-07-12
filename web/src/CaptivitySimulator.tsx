@@ -160,6 +160,8 @@ type CaptivityPending = {
     item_label?: string;
     content?: string;
     text?: string;
+    sequence?: number;
+    total?: number;
   };
   event?: CaptivityEvent;
 };
@@ -213,7 +215,11 @@ type CaptivityView = {
   inventory?: Record<string, boolean | undefined>;
   inventory_secrets?: Record<string, {
     content?: string;
+    entries?: string[];
     revealed?: boolean;
+    revealed_count?: number;
+    total_count?: number;
+    revealed_entries?: string[];
     configured_by?: string;
     configured_at?: string;
   }>;
@@ -478,6 +484,26 @@ const INVENTORY_OPTIONS = [
   { id: "call_bell", label: "呼叫铃", usage: "按下后替你发声" },
 ] as const;
 type InventoryItemId = (typeof INVENTORY_OPTIONS)[number]["id"];
+
+const PROGRESSIVE_SECRET_ITEMS = new Set<InventoryItemId>(["book", "switch", "music_player", "tablet"]);
+const PROGRESSIVE_SECRET_COPY: Partial<Record<InventoryItemId, { label: string; placeholder: string }>> = {
+  book: {
+    label: "这本书曾由你使用。逐行填写页码标记、批注或夹页痕迹；对方每次看书只会发现下一条。",
+    placeholder: "例：第 47 页折过角，旁边留着一行批注\n例：书签停在你反复读过的那一页",
+  },
+  switch: {
+    label: "这台 Switch 曾由你使用。逐行填写游戏记录或账号痕迹；对方每次玩游戏只会发现下一条。",
+    placeholder: "例：最近游玩记录停在某个存档\n例：相册里留着一张没有删掉的截图",
+  },
+  music_player: {
+    label: "这个播放器曾由你使用。逐行填写喜欢的歌或歌单痕迹；对方每次听音乐只会发现下一条。",
+    placeholder: "例：最常播放的歌被单独收藏\n例：某张歌单循环过很多次",
+  },
+  tablet: {
+    label: "这台平板曾由你使用。逐行填写浏览或观看记录；对方每次使用只会发现下一条。",
+    placeholder: "例：浏览记录停在某个页面\n例：观看历史里留下了一段未播完的视频",
+  },
+};
 
 const FEEDING_SOURCE_OPTIONS = [
   { id: "cook", label: "自己做" },
@@ -1656,9 +1682,9 @@ const PENDING_LABELS: Record<string, string> = {
   reaction_choice: "过程已经归档，选择此刻心情。",
   advance_action: "这一段已结束，可以推进下一段行动。",
   night_action_choice: "选择今晚的自由行动。",
-  bell_voice_reveal: "按铃记录已生成，语音铃正在第一次播放。",
+  bell_voice_reveal: "按铃记录已生成，预录台词正在播放。",
   bell_response_choice: "等待{assistant}决定是否过去。",
-  item_secret_reveal: "物品里藏着的彩蛋第一次出现了。",
+  item_secret_reveal: "物品里的一条使用痕迹出现了。",
   monitor_gate: "夜间行动已封存，等待是否打开监控。",
   monitor_handle: "监控内容已打开，选择处理方式。",
   escape_choice: "逃跑机会出现了，等待你的选择。",
@@ -1666,6 +1692,21 @@ const PENDING_LABELS: Record<string, string> = {
   recapture_rules_choice: "抓回经过已保存，等待重新立规矩。",
   recapture_followup_choice: "新规矩已生效，等待选择后续处理。",
   recapture_rules_review: "查看抓回后生效的新规矩。",
+  ending_ready_to_notify: "结局已收录，等待同步给{assistant}。",
+};
+
+const CAPTOR_WAITING_LABELS: Record<string, string> = {
+  action_response: "等待{assistant}选择回应和此刻心情。",
+  process_write: "等待{assistant}补写这一段过程。",
+  process_reaction_write: "等待{assistant}提交回应、过程和心情。",
+  reaction_choice: "等待{assistant}选择此刻心情。",
+  night_action_choice: "等待{assistant}选择今晚的自由行动。",
+  bell_voice_reveal: "等待{assistant}听完本次语音铃播放。",
+  bell_response_choice: "等待{assistant}决定是否过去。",
+  item_secret_reveal: "等待{assistant}查看这次发现的物品痕迹。",
+  escape_choice: "等待{assistant}选择尝试逃跑或老实待着。",
+  return_action_choice: "{assistant}选择了老实待着，决定回来后如何处理。",
+  recapture_rules_review: "等待{assistant}查看抓回后生效的新规矩。",
   ending_ready_to_notify: "结局已收录，等待同步给{assistant}。",
 };
 
@@ -1677,9 +1718,9 @@ const DIRECTIVE_LABELS: Record<string, string> = {
   day_action: "确定回来后的行为",
   submit_process: "保存事件经过",
   choose_mood: "记录此刻心情",
-  ack_bell_voice: "结束首次播放页",
+  ack_bell_voice: "听完本次播放",
   respond_bell: "回应语音铃",
-  ack_item_secret: "看完物品彩蛋",
+  ack_item_secret: "看完本次发现",
   view_monitor: "查看夜间监控",
   monitor_action: "处理监控记录",
   set_recapture_rules: "保存抓回后的新规矩",
@@ -1688,25 +1729,32 @@ const DIRECTIVE_LABELS: Record<string, string> = {
   build_ending_seed: "收录结局",
 };
 
-function pendingLabel(pending: CaptivityPending | null | undefined): string {
-  return PENDING_LABELS[String(pending?.type || "")] || "等待下一步处理。";
+function pendingLabel(pending: CaptivityPending | null | undefined, role?: UserRole): string {
+  const type = String(pending?.type || "");
+  const assistantIsActing = String(pending?.actor || "") === "assistant";
+  if (role === "captor" && CAPTOR_WAITING_LABELS[type] && (assistantIsActing || type === "return_action_choice")) {
+    return CAPTOR_WAITING_LABELS[type];
+  }
+  return PENDING_LABELS[type] || "等待下一步处理。";
 }
 
-function publicDirectiveText(value: unknown, pending?: CaptivityPending | null): string {
+function publicDirectiveText(value: unknown, pending?: CaptivityPending | null, role?: UserRole): string {
   const raw = textLine(value);
   if (!raw) return "";
+  if (role === "captor" && String(pending?.actor || "") === "assistant") return pendingLabel(pending, role);
   const directiveKey = raw.trim().split(/\s+/)[0].replace(/[【】：:]/g, "");
   if (DIRECTIVE_LABELS[directiveKey]) return DIRECTIVE_LABELS[directiveKey];
   if (raw.includes("今日安排")) return DIRECTIVE_LABELS.plan_day;
   if (raw.includes("夜间行动")) return "选择今晚的自由行动";
   if (raw.startsWith("resolve_escape_choice")) return "选择逃跑回应";
-  if (COMMAND_ARG_PATTERN.test(raw)) return pendingLabel(pending);
+  if (COMMAND_ARG_PATTERN.test(raw)) return pendingLabel(pending, role);
   return raw;
 }
 
-function publicSystemText(value: unknown): string {
+function publicSystemText(value: unknown, pending?: CaptivityPending | null, role?: UserRole): string {
   const raw = textLine(value);
   if (!raw) return "";
+  if (role === "captor" && String(pending?.actor || "") === "assistant") return pendingLabel(pending, role);
   for (const [directive, label] of Object.entries(DIRECTIVE_LABELS)) {
     if (raw.includes(directive)) return label;
   }
@@ -1717,7 +1765,7 @@ function publicSystemText(value: unknown): string {
   return raw;
 }
 
-function activeTaskMeta(event: CaptivityEvent, pending: CaptivityPending | null, view: CaptivityView): string {
+function activeTaskMeta(event: CaptivityEvent, pending: CaptivityPending | null, view: CaptivityView, role: UserRole): string {
   const slot = Number(pending?.slot || event.slot || view.day_action_count || 0);
   const specialDay = ["escape_choice", "return_action_choice", "recapture_rules_choice", "recapture_rules_review", "recapture_followup_choice"].includes(String(pending?.type || ""))
     || event.tags?.includes("special_day")
@@ -1725,7 +1773,7 @@ function activeTaskMeta(event: CaptivityEvent, pending: CaptivityPending | null,
   const rows = [
     pending?.type === "escape_choice" && pending.actor === "assistant"
       ? "等待{assistant}选择逃跑回应"
-      : pending ? pendingLabel(pending).replace(/[。.]$/, "") : event.action_label || "当前待机",
+      : pending ? pendingLabel(pending, role).replace(/[。.]$/, "") : event.action_label || "当前待机",
     event.intensity ? `强度 ${intensityLabel(event.intensity)}` : "",
     specialDay ? "特殊事件" : slot > 0 ? `第 ${slot} 段` : `白天行动 ${view.day_action_count || 0} / ${view.day_action_limit || 3}`,
   ].filter(Boolean);
@@ -1733,7 +1781,9 @@ function activeTaskMeta(event: CaptivityEvent, pending: CaptivityPending | null,
 }
 
 function commandText(payload: CaptivityPayload | null): string {
-  return publicSystemText(payload?.player_text || payload?.text || payload?.reply_text || payload?.reply_preview);
+  const role = roleFromPayload(payload);
+  const view = viewFromPayload(payload);
+  return publicSystemText(payload?.player_text || payload?.text || payload?.reply_text || payload?.reply_preview, view.pending_event, role);
 }
 
 async function executeCaptivityCommand(command: string): Promise<CaptivityPayload> {
@@ -2239,6 +2289,11 @@ function InventoryWarehouse({
   const [itemSecretText, setItemSecretText] = useState("");
   const selectedOption = INVENTORY_OPTIONS.find((item) => item.id === selectedItem);
   const selectedActive = selectedItem ? Boolean(activeItems[selectedItem]) : false;
+  const progressiveCopy = selectedItem ? PROGRESSIVE_SECRET_COPY[selectedItem] : undefined;
+  const selectedSecret = selectedItem ? inventorySecrets?.[selectedItem] : undefined;
+  const selectedEntries = selectedSecret?.entries || [];
+  const selectedTotal = selectedSecret?.total_count ?? selectedEntries.length;
+  const selectedRevealed = selectedSecret?.revealed_count ?? (selectedSecret?.revealed ? selectedTotal : 0);
 
   function handleItemAction() {
     if (!selectedItem) return;
@@ -2285,28 +2340,47 @@ function InventoryWarehouse({
             <div className="warehouse-menu-state">{selectedActive ? "已赠送" : "未赠送"}</div>
           </div>
           {!selectedActive ? (
-            <textarea
-              className="warehouse-voice-input"
-              value={itemSecretText}
-              maxLength={500}
-              disabled={disabled}
-              placeholder={selectedItem === "call_bell" ? "设置按下后由铃替被囚禁方说出的台词" : "可选：设置第一次使用时出现的隐藏彩蛋"}
-              onChange={(event) => setItemSecretText(event.target.value)}
-            />
+            <>
+              <div className="warehouse-secret-label">
+                {selectedItem === "call_bell"
+                  ? "对方每次按下时，都会听见铃替他说出这句话。"
+                  : progressiveCopy
+                    ? progressiveCopy.label
+                  : "对方第一次使用这个物品时会看到这句话。"}
+              </div>
+              <textarea
+                className="warehouse-voice-input"
+                value={itemSecretText}
+                maxLength={progressiveCopy ? 1000 : 500}
+                disabled={disabled}
+                placeholder={selectedItem === "call_bell"
+                  ? "输入铃声播放的预录台词"
+                  : progressiveCopy?.placeholder || "可选：输入第一次使用时显示的内容"}
+                onChange={(event) => setItemSecretText(event.target.value)}
+              />
+            </>
           ) : null}
-          {selectedActive && (selectedItem === "call_bell" ? callBellVoice?.line : inventorySecrets?.[selectedItem]?.content) ? (
+          {selectedActive && (selectedItem === "call_bell" ? callBellVoice?.line : selectedSecret?.content || selectedEntries.length) ? (
             <div className="warehouse-voice-current">
               <div className="warehouse-menu-state">
-                {selectedItem === "call_bell" ? "预录台词" : `隐藏彩蛋 · ${inventorySecrets?.[selectedItem]?.revealed ? "已揭晓" : "未揭晓"}`}
+                {selectedItem === "call_bell"
+                  ? "每次播放的预录台词"
+                  : PROGRESSIVE_SECRET_ITEMS.has(selectedItem as InventoryItemId)
+                    ? `使用痕迹 · 已发现 ${selectedRevealed} / ${selectedTotal}`
+                    : `首次使用文案 · ${selectedSecret?.revealed ? "已揭晓" : "未揭晓"}`}
               </div>
-              <div>{selectedItem === "call_bell" ? callBellVoice?.line : inventorySecrets?.[selectedItem]?.content}</div>
+              <div>{selectedItem === "call_bell"
+                ? callBellVoice?.line
+                : selectedEntries.length
+                  ? selectedEntries.map((entry, index) => `${index + 1}. ${entry}`).join("\n")
+                  : selectedSecret?.content}</div>
             </div>
           ) : null}
           <div className="warehouse-actions">
             <button
               className="btn"
               type="button"
-              disabled={disabled || (selectedItem === "call_bell" && !selectedActive && !itemSecretText.trim())}
+              disabled={disabled || (!selectedActive && (selectedItem === "call_bell" || PROGRESSIVE_SECRET_ITEMS.has(selectedItem as InventoryItemId)) && !itemSecretText.trim())}
               onClick={handleItemAction}
             >
               {selectedActive ? "收回" : "赠送"}
@@ -2361,6 +2435,7 @@ function CaptiveRoomInventory({
 export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
   const [payload, setPayload] = useState<CaptivityPayload | null>(null);
   const [screen, setScreen] = useState<"selector" | "game">("selector");
+  const [identityConfirmOpen, setIdentityConfirmOpen] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(true);
   const [backgroundSyncing, setBackgroundSyncing] = useState(false);
   const [footerTab, setFooterTab] = useState<"status" | "history" | "special">("status");
@@ -2430,6 +2505,7 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
   const busy = (wait.visible && !wait.error) || backgroundSyncing;
   const pendingType = String(pending?.type || "");
   const milestoneCopy = dayMilestoneCopy(Number(view.current_day || 1), role);
+  const hasExistingProgress = hasMeaningfulProgress(view);
 
   const eventLog = useMemo(() => view.event_log || [], [view.event_log]);
   const latestEvent = eventLog[eventLog.length - 1];
@@ -2706,6 +2782,7 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
   }
 
   function returnToSelector() {
+    setIdentityConfirmOpen(false);
     setProcessReview(null);
     setRecaptureBridgeVisible(false);
     setHistoryDetail(null);
@@ -3616,6 +3693,11 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
           <span>Captivity</span>
           <span>Simulator</span>
         </h1>
+        {hasExistingProgress ? (
+          <div className="selector-save-warning">
+            当前存档仍保留。重新选择任一身份会开始新游戏并覆盖当前进度。
+          </div>
+        ) : null}
         <button className="identity-card" type="button" onClick={() => startRoute("captured_by_assistant")}>
           <div className="uppercase">CAPTIVE</div>
           <div className="identity-card-title serif">被囚禁方</div>
@@ -3636,7 +3718,7 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
               type="button"
               aria-label="返回身份选择"
               disabled={busy}
-              onClick={returnToSelector}
+              onClick={() => setIdentityConfirmOpen(true)}
             >
               <span>IDENTITY: {role === "captor" ? "囚禁方" : "被囚禁方"}</span>
             </button>
@@ -3866,6 +3948,22 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
         <SceneTransitionOverlay scene={sceneTransition} onDismiss={dismissSceneTransition} />
       ) : null}
 
+      {identityConfirmOpen ? (
+        <div className="identity-confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="identity-confirm-title">
+          <div className="identity-confirm-dialog">
+            <div className="action-metadata">IDENTITY</div>
+            <div className="panel-title identity-confirm-title" id="identity-confirm-title">返回身份选择</div>
+            <div className="event-sub identity-confirm-copy">
+              当前存档不会立刻删除；但返回后重新选择任一身份，会开始新游戏并覆盖当前进度。
+            </div>
+            <div className="btn-group identity-confirm-actions">
+              <button className="btn" type="button" onClick={() => setIdentityConfirmOpen(false)}>取消</button>
+              <button className="btn active" type="button" onClick={returnToSelector}>返回选择</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div id="wait-overlay" className={`wait-overlay ${wait.visible ? "active" : ""}`}>
         <div className="loading-animation">+</div>
         <div className="serif pink-text" style={{ fontSize: 30, marginBottom: 10 }}>
@@ -3976,6 +4074,15 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
             margin-top: 14px;
             color: #777;
             letter-spacing: 0.08em;
+        }
+        .captivity-game .selector-save-warning {
+            width: min(100%, 430px);
+            margin: 0 auto 16px;
+            padding: 10px 12px;
+            border-left: 2px solid var(--pink);
+            color: #bbb;
+            font-size: 11px;
+            line-height: 1.6;
         }
         .captivity-game .monitor-room-screen,
         .captivity-game .inventory-room-screen {
@@ -4768,6 +4875,12 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
             color: #aaa;
             font-size: 10px;
         }
+        .captivity-game .warehouse-secret-label {
+            margin-top: 10px;
+            color: #ccc;
+            font-size: 10px;
+            line-height: 1.5;
+        }
         .captivity-game .warehouse-actions {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5166,6 +5279,31 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
             justify-content: center;
         }
         .captivity-game .wait-overlay.active { display: flex; }
+        .captivity-game .identity-confirm-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 970;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: calc(var(--safe-top) + 22px) 22px calc(var(--safe-bottom) + 22px);
+            background: rgba(0, 0, 0, 0.76);
+            -webkit-backdrop-filter: blur(8px);
+            backdrop-filter: blur(8px);
+        }
+        .captivity-game .identity-confirm-dialog {
+            width: min(100%, 390px);
+            padding: 22px 20px 20px;
+            border: 0.5px solid #555;
+            border-left: 3px solid var(--pink);
+            background: #151515;
+        }
+        .captivity-game .identity-confirm-title { margin: 8px 0 14px; }
+        .captivity-game .identity-confirm-copy { white-space: normal; line-height: 1.7; }
+        .captivity-game .identity-confirm-actions {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            margin-top: 20px;
+        }
         .captivity-game .wait-scene-copy {
             max-width: 460px;
             margin-bottom: 18px;
@@ -5914,14 +6052,14 @@ function RuntimePanel({
           </div>
           <div className="action-card">
             <div className="action-metadata">
-              {activeTaskMeta(event, pending, view)}
+              {activeTaskMeta(event, pending, view, role)}
             </div>
             <div className="event-main">
               {pendingType === "escape_choice" && waitingForAssistant
                 ? "逃跑诱导已经送达{assistant}。"
                 : isRecaptureDecision
-                  ? pendingLabel(pending)
-                : event.line || event.action_label || publicDirectiveText(pending?.required_directive, pending) || (isEnding ? "30 天闭环已完成，等待结局。" : "等待下一段事件。")}
+                  ? pendingLabel(pending, role)
+                : event.line || event.action_label || publicDirectiveText(pending?.required_directive, pending, role) || (isEnding ? "30 天闭环已完成，等待结局。" : "等待下一段事件。")}
             </div>
             <div className="divider" />
             <div className="event-sub">
@@ -5990,6 +6128,8 @@ function RuntimePanel({
           itemId={pending?.item_secret?.item_id || "item"}
           itemLabel={pending?.item_secret?.item_label || "物品"}
           text={pending?.item_secret?.text || "你发现了预先藏在物品里的内容。"}
+          sequence={pending?.item_secret?.sequence}
+          total={pending?.item_secret?.total}
           disabled={disabled}
           onConfirm={onAckItemSecret}
         />
@@ -6109,7 +6249,7 @@ function renderEventSummary(event: CaptivityEvent, pending: CaptivityPending | n
     recaptureContext.followup_label ? `后续处理：${recaptureContext.followup_label}` : "",
     pending?.type === "escape_choice" && pending.actor === "assistant"
       ? "等待：{assistant}选择尝试逃跑或老实待着"
-      : pending?.required_directive ? `等待：${publicDirectiveText(pending.required_directive, pending)}` : "",
+      : pending?.required_directive ? `等待：${publicDirectiveText(pending.required_directive, pending, role)}` : "",
     pending?.type === "return_action_choice" || event.tags?.includes("special_day")
       ? `进度：第 ${view.current_day || 1} / ${view.total_days || 30} 天，特殊事件`
       : `进度：第 ${view.current_day || 1} / ${view.total_days || 30} 天，白天行动 ${view.day_action_count || 0} / ${view.day_action_limit || 3}`,
@@ -6351,9 +6491,9 @@ function BellVoiceRevealPanel({
   onConfirm: () => void;
 }) {
   return (
-    <div className="bell-voice-overlay item-reveal-call_bell" role="dialog" aria-modal="true" aria-label="语音铃第一次播放">
+    <div className="bell-voice-overlay item-reveal-call_bell" role="dialog" aria-modal="true" aria-label="语音铃播放">
       <div className="bell-voice-dialog item-reveal-dialog">
-        <div className="bell-voice-kicker">SYSTEM / FIRST PLAYBACK</div>
+        <div className="bell-voice-kicker">SYSTEM / VOICE PLAYBACK</div>
         <div className="item-reveal-motif" aria-hidden="true"><span /><span /><span /><span /></div>
         <div className="serif bell-voice-line">
           铃响了，你听见「{line || "预录的声音"}」在静谧的房间里响起
@@ -6434,19 +6574,26 @@ function ItemSecretRevealPanel({
   itemId,
   itemLabel,
   text,
+  sequence,
+  total,
   disabled,
   onConfirm,
 }: {
   itemId: string;
   itemLabel: string;
   text: string;
+  sequence?: number;
+  total?: number;
   disabled?: boolean;
   onConfirm: () => void;
 }) {
+  const progressive = Number(total || 0) > 1;
   return (
-    <div className={`bell-voice-overlay item-reveal-${itemId}`} role="dialog" aria-modal="true" aria-label={`${itemLabel}第一次使用彩蛋`}>
+    <div className={`bell-voice-overlay item-reveal-${itemId}`} role="dialog" aria-modal="true" aria-label={`${itemLabel}${progressive ? "使用痕迹" : "第一次使用彩蛋"}`}>
       <div className="bell-voice-dialog item-reveal-dialog">
-        <div className="bell-voice-kicker">{itemLabel} / FIRST DISCOVERY</div>
+        <div className="bell-voice-kicker">
+          {itemLabel} / {progressive ? `DISCOVERY ${sequence || 1} OF ${total}` : "FIRST DISCOVERY"}
+        </div>
         <div className="item-reveal-motif" aria-hidden="true"><span /><span /><span /><span /></div>
         <div className="serif bell-voice-line">{text}</div>
         <button className="btn bell-voice-continue" type="button" disabled={disabled} onClick={onConfirm}>继续</button>

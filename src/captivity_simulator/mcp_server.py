@@ -7,6 +7,7 @@ from typing import Any
 
 from .configuration import load_config, render_placeholders
 from .engine import run_command
+from .projection import project_payload
 from .server import _save_path
 
 
@@ -79,7 +80,7 @@ def _tool_definition() -> dict[str, Any]:
 
 def _configured_status(save_id: str) -> dict[str, Any]:
     payload = run_command("status", save_path=_save_path(save_id))
-    return render_placeholders(payload, load_config())
+    return render_placeholders(project_payload(payload, "assistant", include_commands=True, include_engine_text=True), load_config())
 
 
 def _call_tool(params: Any) -> dict[str, Any]:
@@ -97,7 +98,8 @@ def _call_tool(params: Any) -> dict[str, Any]:
         raise RpcError(-32602, "Invalid params: command is required")
     save_id = str(arguments.get("save_id") or "default")
     payload = run_command(command, save_path=_save_path(save_id))
-    configured = render_placeholders(payload, load_config())
+    projected = project_payload(payload, "assistant", include_commands=True, include_engine_text=True)
+    configured = render_placeholders(projected, load_config())
     result: dict[str, Any] = {
         "content": [{"type": "text", "text": str(configured.get("text") or "")}],
         "structuredContent": configured,

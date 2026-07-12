@@ -13,6 +13,8 @@ FORBIDDEN = {
     "old user actor id": "xin" + "yue",
     "old assistant route id": "captured_by_" + "du",
     "old captor route id": "capture_" + "du",
+    "old assistant identifier": "du" + "_captive",
+    "old assistant constant": "ENDING_" + "DU",
     "private sync route": "sync-" + "du",
     "private storage service": "r2_" + "store",
     "private gateway name": "du-" + "gateway",
