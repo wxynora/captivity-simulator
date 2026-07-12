@@ -1,0 +1,28 @@
+@font-face {
+  font-family: "SumiChatScript";
+  src: url("./assets/cookie-regular.ttf") format("truetype");
+  font-display: swap;
+  font-style: normal;
+  font-weight: 400;
+}
+
+:root {
+  color-scheme: dark;
+  font-family: Inter, system-ui, sans-serif;
+  background: #121212;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+  background: #121212;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}

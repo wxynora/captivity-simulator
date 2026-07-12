@@ -1,0 +1,26 @@
+{
+  "actors": {
+    "user": "{user}",
+    "assistant": "{assistant}"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 5058
+  },
+  "ai": {
+    "enabled": false,
+    "base_url": "",
+    "api_key_env": "CAPTIVITY_AI_API_KEY",
+    "model": "",
+    "temperature": 0.9,
+    "timeout_seconds": 120
+  },
+  "prompt": {
+    "route_openings": {
+      "captured_by_assistant": "你正在和{user}玩一场私密博弈游戏。在这局游戏里，{user}是被你囚禁的人。",
+      "capture_assistant": "你正在和{user}玩一场私密博弈游戏。在这局游戏里，你被{user}囚禁在这里。"
+    },
+    "process_style": "根据当前事件素材，从你正在经历这件事的视角完整记录经过。",
+    "extra_rules": []
+  }
+}

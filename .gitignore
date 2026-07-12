@@ -1,0 +1,16 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+config/local.json
+data/*
+!data/.gitkeep
+
+web/node_modules/
+web/dist/
+web/.vite/
+*.tsbuildinfo

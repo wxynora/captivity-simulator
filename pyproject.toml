@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "captivity-simulator"
+version = "0.1.0"
+description = "A local-first, rules-driven 18+ captivity roleplay simulator."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = ["Flask>=3.0,<4"]
+
+[project.scripts]
+captivity-simulator = "captivity_simulator.server:main"
+captivity-simulator-mcp = "captivity_simulator.mcp_server:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

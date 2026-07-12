@@ -1,0 +1,12 @@
+{
+  "actors": {
+    "user": "你的名字",
+    "assistant": "AI 角色名"
+  },
+  "ai": {
+    "enabled": true,
+    "base_url": "https://example.com/v1",
+    "api_key_env": "CAPTIVITY_AI_API_KEY",
+    "model": "your-model-name"
+  }
+}
