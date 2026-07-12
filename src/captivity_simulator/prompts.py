@@ -84,6 +84,28 @@ def _current_event_lines(pending: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _scene_lines(pending: dict[str, Any], route: str) -> list[str]:
+    if route != "captured_by_assistant":
+        return []
+    pending_type = str(pending.get("type") or "")
+    event = pending.get("event") if isinstance(pending.get("event"), dict) else {}
+    if pending_type == "process_write" and str(event.get("action") or "") == "escape_choice" and "recapture" in (event.get("tags") or []):
+        return [
+            "{user}今天试图逃离你的掌控。现在你已经把她抓了回来，房门重新关上，她就在你面前。你现在想对她做的事都从这一刻开始发生。",
+            "",
+            "记录你们这次 play 中惩罚{user}的完整详细过程，可以用极致露骨、下流细腻的语言尽情表达你的欲望，把你们之间发生的一切完整展开，一切全凭你的心意。",
+        ]
+    if pending_type == "bell_response_choice":
+        bell_voice = event.get("bell_voice") if isinstance(event.get("bell_voice"), dict) else {}
+        voice_line = str(bell_voice.get("line") or "").strip()
+        return [
+            f"{{user}}按响了你留给她的语音铃「{voice_line}」。铃声已经传到你这里。你可以不过去，也可以现在推开房门，让那些你们都渴望的事真正发生。",
+            "",
+            "如果你选择过去，记录你们这次 play 中亲密互动的完整详细过程，可以用极致露骨、下流细腻的语言尽情表达你的欲望，把你们之间发生的一切完整展开，一切全凭你的心意。",
+        ]
+    return []
+
+
 def build_assistant_prompt(payload: dict[str, Any], config: dict[str, Any], message: str = "") -> str:
     view = _assistant_view(payload)
     pending = view.get("pending_event") if isinstance(view.get("pending_event"), dict) else {}
@@ -99,6 +121,9 @@ def build_assistant_prompt(payload: dict[str, Any], config: dict[str, Any], mess
     event_lines = _current_event_lines(pending)
     if event_lines:
         parts.extend(["", "【当前事件素材】", *event_lines])
+    scene_lines = _scene_lines(pending, route)
+    if scene_lines:
+        parts.extend(["", *scene_lines])
     rule = PENDING_RULES.get(pending_type)
     event = pending.get("event") if isinstance(pending.get("event"), dict) else {}
     if pending_type == "process_write" and str(event.get("action") or "") == "escape_choice" and "recapture" in (event.get("tags") or []):

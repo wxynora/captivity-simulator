@@ -88,7 +88,33 @@ class EngineTest(unittest.TestCase):
             self.assertEqual(assistant_pending["event"]["bell_voice"]["line"], "每次都要播放这句")
             prompt = build_assistant_prompt(acknowledged, config)
             self.assertIn("语音铃播放：「每次都要播放这句」", prompt)
+            self.assertIn("Player按响了你留给她的语音铃「每次都要播放这句」", prompt)
+            self.assertIn("让那些你们都渴望的事真正发生", prompt)
+            self.assertIn("把你们之间发生的一切完整展开", prompt)
             self.assertNotIn('"pending_event"', prompt)
+
+    def test_recapture_prompt_uses_placeholder_scene_copy(self) -> None:
+        config = {
+            "actors": {"user": "Player", "assistant": "Partner"},
+            "prompt": {"route_openings": {"captured_by_assistant": "opening"}},
+        }
+        payload = {
+            "captor_view": {
+                "captor": "assistant",
+                "route": "captured_by_assistant",
+                "pending_event": {
+                    "type": "process_write",
+                    "actor": "assistant",
+                    "event": {"action": "escape_choice", "tags": ["recapture"]},
+                },
+            },
+            "text": "status",
+        }
+        prompt = build_assistant_prompt(payload, config)
+        self.assertIn("Player今天试图逃离你的掌控", prompt)
+        self.assertIn("你现在想对她做的事都从这一刻开始发生", prompt)
+        self.assertIn("把你们之间发生的一切完整展开", prompt)
+        self.assertIn("【抓回经过：rules=double_lock,key_isolation】", prompt)
 
     def test_used_items_reveal_one_trace_per_use(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
