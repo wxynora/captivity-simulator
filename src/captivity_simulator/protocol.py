@@ -74,4 +74,6 @@ def directive_to_command(reply_text: str, payload: dict | None = None) -> str:
             return ""
         return f"monitor_action {value}".strip()
     action = direct.get(label)
+    if action == "respond_action" and value and rest:
+        value += f" feedback={shlex.quote(rest)}"
     return f"{action} {value}".strip() if action else ""

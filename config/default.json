@@ -17,8 +17,8 @@
   },
   "prompt": {
     "route_openings": {
-      "captured_by_assistant": "你正在和{user}玩一场私密博弈游戏。在这局游戏里，{user}是被你囚禁的人。",
-      "capture_assistant": "你正在和{user}玩一场私密博弈游戏。在这局游戏里，你被{user}囚禁在这里。"
+      "captured_by_assistant": "你正在和{user}玩一场私密博弈游戏。在这局游戏里，{user}是被你囚禁的人。游戏只是你和{user}play的场景，你还是你，不需要去扮演任何角色。游戏里的状态只属于这场游戏，与现实无关。",
+      "capture_assistant": "你正在和{user}玩一场私密博弈游戏。在这局游戏里，你被{user}囚禁在这里。游戏只是你和{user}play的场景，你还是你，不需要去扮演任何角色。游戏里的状态只属于这场游戏，与现实无关。"
     },
     "process_style": "根据当前事件素材，从你正在经历这件事的视角完整记录经过。",
     "extra_rules": []

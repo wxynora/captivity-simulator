@@ -70,6 +70,7 @@ type CaptivityEvent = {
   feeding?: Record<string, string>;
   effects?: Record<string, number>;
   process_text?: string;
+  assistant_feedback_text?: string;
   process_saved_at?: string;
   resolved_at?: string;
   created_at?: string;
@@ -179,6 +180,7 @@ type DayPlanSpec = {
 };
 
 type CaptivityView = {
+  started?: boolean;
   route?: RouteKey | string;
   route_label?: string;
   viewer?: "captive" | "captor" | string;
@@ -1660,6 +1662,7 @@ function buildProcessPreviewAfterSave(role: UserRole, mood: string, line: string
 
 function hasMeaningfulProgress(view: CaptivityView | undefined): boolean {
   if (!view) return false;
+  if (view.started) return true;
   if (Number(view.current_day || 1) > 1) return true;
   if (Number(view.day_action_count || 0) > 0) return true;
   if (String(view.phase || "day") !== "day") return true;
@@ -3041,15 +3044,17 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       setFooterTab("status");
       return;
     }
+    const playerLine = String(planSlots[0]?.line || "").trim();
     void runWithWait(
       isReturnActionPlanner ? "正在确定回来后的行为..." : "正在下发今日安排...",
       "SYNC_RESULT: PENDING",
       () => executeCaptivityCommand(isReturnActionPlanner ? buildReturnActionCommand() : buildPlanCommand()),
-    ).then((next) => continueAutomaticSync(next));
+    ).then((next) => continueAutomaticSync(next, Boolean(playerLine), false, playerLine));
   }
 
   function submitResponse() {
     if (previewRole) return;
+    const playerLine = responseLine.trim();
     void runWithWait(
       "正在提交回应...",
       "REASON: WAITING_FOR_SUBJECT_REACTION",
@@ -3057,12 +3062,13 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
     ).then((next) => {
       if (!next) return;
       setResponseLine("");
-      continueAutomaticSync(next);
+      continueAutomaticSync(next, Boolean(playerLine), false, playerLine);
     });
   }
 
   function submitMood() {
     if (previewRole) return;
+    const playerLine = reactionLine.trim();
     void runWithWait(
       "正在记录此刻心情...",
       "STATUS: ARCHIVING PROCESS_REACTION",
@@ -3070,7 +3076,7 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
     ).then((next) => {
       if (!next) return;
       setReactionLine("");
-      continueAutomaticSync(next);
+      continueAutomaticSync(next, Boolean(playerLine), false, playerLine);
     });
   }
 
@@ -3148,6 +3154,7 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       return;
     }
     if (previewRole) return;
+    const playerLine = nightLine.trim();
     const parts = [`night_action action=${nightAction}`];
     if (nightDetail) parts.push(`detail=${nightDetail}`);
     if (nightAction === "diary" && nightNote.trim()) parts.push(`note=${quoteArg(nightNote.trim())}`);
@@ -3156,7 +3163,16 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       "正在保存夜间行动...",
       "STATUS: SAVING MONITOR DATA",
       () => executeCaptivityCommand(parts.join(" ")),
-    ).then((next) => continueAutomaticSync(next));
+    ).then((next) => {
+      if (!next) return;
+      const nextType = String(viewFromPayload(next).pending_event?.type || "");
+      if (nextType === "bell_voice_reveal" || nextType === "item_secret_reveal") {
+        continueAutomaticSync(next);
+        return;
+      }
+      setNightLine("");
+      continueAutomaticSync(next, Boolean(playerLine), false, playerLine);
+    });
   }
 
   function ackBellVoice() {
@@ -3187,7 +3203,12 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       "正在确认铃声...",
       "STATUS: BELL_VOICE_HEARD",
       () => executeCaptivityCommand("ack_bell_voice"),
-    ).then((next) => continueAutomaticSync(next));
+    ).then((next) => {
+      if (!next) return;
+      const playerLine = nightLine.trim();
+      setNightLine("");
+      continueAutomaticSync(next, Boolean(playerLine), false, playerLine);
+    });
   }
 
   function ackItemSecret() {
@@ -3217,10 +3238,15 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       "正在收起物品彩蛋...",
       "STATUS: ITEM_SECRET_SEEN",
       () => executeCaptivityCommand("ack_item_secret"),
-    ).then((next) => continueAutomaticSync(next));
+    ).then((next) => {
+      if (!next) return;
+      const playerLine = nightLine.trim();
+      setNightLine("");
+      continueAutomaticSync(next, Boolean(playerLine), false, playerLine);
+    });
   }
 
-  function continueAutomaticSync(next: CaptivityPayload | null, force = false, background = false) {
+  function continueAutomaticSync(next: CaptivityPayload | null, force = false, background = false, playerMessage = "") {
     if (!next) return;
     const nextView = viewFromPayload(next);
     const nextPendingType = String(nextView.pending_event?.type || "");
@@ -3228,7 +3254,7 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
     const waitingForAssistantNext = String(nextView.pending_event?.actor || "") === "assistant";
     const endingNext = String(nextView.phase || "") === "ending" || nextPendingType.startsWith("ending_") || Boolean(nextView.ending_state);
     if (!force && !waitingForAssistantNext && !endingNext) return;
-    syncAssistant(endingNext ? "ending" : "state_update", next, background);
+    syncAssistant(endingNext ? "ending" : "state_update", next, background, playerMessage);
   }
 
   function playNextStageForPayload(next: CaptivityPayload) {
@@ -3241,6 +3267,7 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
     mode: "chat" | "state_update" | "ending" = "state_update",
     previousPayloadOverride?: CaptivityPayload | null,
     background = false,
+    playerMessage = "",
   ) {
     if (previewRole) {
       showPreviewSyncWait();
@@ -3256,7 +3283,7 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       }
       const nextView = viewFromPayload(next);
       if (String(nextView.pending_event?.actor || "") === "assistant") {
-        lastFailedRetryRef.current = () => syncAssistant(mode, next, background);
+        lastFailedRetryRef.current = () => syncAssistant(mode, next, background, playerMessage);
         setHasFailedRetry(true);
       }
     };
@@ -3264,21 +3291,21 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       void runWithWait(
         "正在同步{assistant}...",
         "STATUS: ENCRYPTING DATA",
-        () => syncCaptivityToAssistant(mode, "", true),
+        () => syncCaptivityToAssistant(mode, playerMessage, true),
       ).then(handleResult);
       return;
     }
     setBackgroundSyncing(true);
     lastFailedRetryRef.current = null;
     setHasFailedRetry(false);
-    void syncCaptivityToAssistant(mode, "", true)
+    void syncCaptivityToAssistant(mode, playerMessage, true)
       .then((next) => {
         applyPayload(next);
         handleResult(next);
       })
       .catch((error: any) => {
         const message = String(error?.message || error || "同步失败");
-        lastFailedRetryRef.current = () => syncAssistant(mode, previousPayload, true);
+        lastFailedRetryRef.current = () => syncAssistant(mode, previousPayload, true, playerMessage);
         setHasFailedRetry(true);
         setWait({ visible: true, title: "同步失败", detail: message, error: message });
       })
@@ -3380,11 +3407,12 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       () => executeCaptivityCommand(`choose_mood mood=${quoteArg(reactionMood)} line=${quoteArg(reactionLine.trim())}`),
     ).then((next) => {
       if (!next) return;
+      const playerLine = reactionLine.trim();
       setReactionLine("");
       setProcessReview(null);
       setFooterTab("status");
       playNextStageForPayload(next);
-      continueAutomaticSync(next);
+      continueAutomaticSync(next, Boolean(playerLine), false, playerLine);
     });
   }
 
@@ -3394,7 +3422,11 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       "正在推进下一段行动...",
       "STATUS: ADVANCING SLOT",
       () => executeCaptivityCommand("advance_day_action"),
-    ).then((next) => continueAutomaticSync(next));
+    ).then((next) => {
+      if (!next) return;
+      const playerLine = textLine(viewFromPayload(next).pending_event?.event?.line);
+      continueAutomaticSync(next, Boolean(playerLine), false, playerLine);
+    });
   }
 
   function chooseEscape(choice: string) {
@@ -3624,7 +3656,10 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       "正在下发后续处理...",
       "STATUS: LINKING RECAPTURE EVENT",
       () => executeCaptivityCommand(parts.join(" ")),
-    ).then((next) => continueAutomaticSync(next));
+    ).then((next) => {
+      const playerLine = recaptureLine.trim();
+      continueAutomaticSync(next, Boolean(playerLine), false, playerLine);
+    });
   }
 
   function openMonitor(style: "occasional" | "full") {
@@ -3653,7 +3688,10 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       "正在记录监控处理...",
       "正在保存监控处理",
       () => executeCaptivityCommand(parts.join(" ")),
-    ).then((next) => continueAutomaticSync(next));
+    ).then((next) => {
+      const playerLine = strategy === "intervene" ? interventionLine.trim() : "";
+      continueAutomaticSync(next, Boolean(playerLine), false, playerLine);
+    });
   }
 
   function scheduleEscape() {
@@ -6121,6 +6159,9 @@ function RuntimePanel({
                 : event.line || event.action_label || publicDirectiveText(pending?.required_directive, pending, role) || (isEnding ? "30 天闭环已完成，等待结局。" : "等待下一段事件。")}
             </div>
             <div className="divider" />
+            {pendingType === "advance_action" && role === "captor" && event.assistant_feedback_text ? (
+              <div className="process-text action-feedback-body">{event.assistant_feedback_text}</div>
+            ) : null}
             <div className="event-sub">
               {renderEventSummary(event, pending, view, role)}
             </div>

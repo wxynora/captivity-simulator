@@ -128,6 +128,9 @@ def build_assistant_prompt(payload: dict[str, Any], config: dict[str, Any], mess
     game_text = _clean_game_text(payload.get("text") or payload.get("player_text"))
     parts = [opening, "", "【当前游戏状态】", game_text]
     event_lines = _current_event_lines(pending)
+    if message.strip():
+        message_excerpt = message.strip()[:220]
+        event_lines = [line for line in event_lines if message_excerpt not in line]
     if event_lines:
         parts.extend(["", "【当前事件素材】", *event_lines])
     scene_lines = _scene_lines(pending, route)

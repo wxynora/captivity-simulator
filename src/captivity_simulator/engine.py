@@ -899,7 +899,7 @@ def run_command(command: str = "", save_path: str | Path | None = None) -> dict[
                         "route": str(previous_state.get("route") or "").strip(),
                         "notified_at": str(previous_state.get("ending_notified_at") or "").strip(),
                     }
-            state = _new_state(route=str(args.get("route") or "captured_by_assistant"), seed=str(args.get("seed") or ""))
+            state = _new_state(route=str(args.get("route") or "captured_by_assistant"), seed=str(args.get("seed") or ""), started=True)
             state["previous_ending"] = previous_ending
             _maybe_create_day_plan_choice_pending(state)
             _save_state(path, state)
@@ -1261,13 +1261,14 @@ def _tail_after_n_positional(args: dict[str, Any], tail: str, count: int) -> str
     return pieces[count].strip() if len(pieces) > count else ""
 
 
-def _new_state(route: str = "captured_by_assistant", seed: str = "") -> dict[str, Any]:
+def _new_state(route: str = "captured_by_assistant", seed: str = "", *, started: bool = False) -> dict[str, Any]:
     route_key = _normalize_route(route)
     config = ROUTES[route_key]
     now = now_local_iso()
     return {
         "schema_version": SCHEMA_VERSION,
         "game_id": GAME_ID,
+        "started": bool(started),
         "seed": str(seed or "").strip() or secrets.token_hex(4),
         "route": route_key,
         "route_label": config["label"],
@@ -1473,6 +1474,20 @@ def _normalize_state(state: dict[str, Any]) -> None:
     state["event_log"] = [item for item in state.get("event_log") or [] if isinstance(item, dict)]
     for item in state["event_log"]:
         _normalize_action_materials(item)
+    if "started" not in state:
+        state["started"] = bool(
+            route_key == "capture_assistant"
+            or int(state.get("current_day") or 1) > 1
+            or int(state.get("day_action_count") or 0) > 0
+            or str(state.get("phase") or "day") != "day"
+            or pending
+            or state["day_plan"]
+            or state["event_log"]
+            or state.get("game_over")
+            or state.get("ending_state")
+        )
+    else:
+        state["started"] = bool(state.get("started"))
     deferred_materials = state.get("deferred_monitor_materials") if isinstance(state.get("deferred_monitor_materials"), list) else []
     state["deferred_monitor_materials"] = [
         normalized
@@ -1867,7 +1882,8 @@ def _respond_action(state: dict[str, Any], args: dict[str, Any]) -> tuple[bool, 
     if mood not in MOODS:
         return False, [f"未知心情：{args.get('mood') or ''}。可选：{' / '.join(sorted(MOODS))}"]
     line = str(args.get("line") or "").strip()
-    forbidden = _first_forbidden([response, mood, line])
+    assistant_feedback = str(args.get("feedback") or "").strip()
+    forbidden = _first_forbidden([response, mood, line, assistant_feedback])
     if forbidden:
         return False, [f"包含禁用项：{forbidden}"]
 
@@ -1881,6 +1897,8 @@ def _respond_action(state: dict[str, Any], args: dict[str, Any]) -> tuple[bool, 
         "created_at": now_local_iso(),
     }
     event["mood"] = mood
+    if assistant_feedback:
+        event["assistant_feedback_text"] = assistant_feedback
     event.setdefault("tags", []).append(f"response:{response}")
     _apply_action_response_effects(event, response)
     state["mood"] = mood
@@ -4287,6 +4305,7 @@ def _view_state(state: dict[str, Any], view: str) -> dict[str, Any]:
     status = _status_profile(state)
     payload = {
         "schema_version": SCHEMA_VERSION,
+        "started": bool(state.get("started")),
         "route": str(state.get("route") or ""),
         "route_label": str(state.get("route_label") or ""),
         "viewer": view,

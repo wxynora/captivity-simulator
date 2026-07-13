@@ -33,12 +33,16 @@ class EngineTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             first = run_command("new_game route=captured_by_assistant", Path(directory) / "first.json")
             second = run_command("new_game route=capture_assistant", Path(directory) / "second.json")
+            unopened = run_command("status", Path(directory) / "unopened.json")
         self.assertTrue(first["ok"])
+        self.assertTrue(first["captive_view"]["started"])
         self.assertEqual(first["captor_view"]["captor"], "assistant")
         self.assertEqual(first["captive_view"]["captive"], "user")
         self.assertTrue(second["ok"])
+        self.assertTrue(second["captor_view"]["started"])
         self.assertEqual(second["captor_view"]["captor"], "user")
         self.assertEqual(second["captive_view"]["captive"], "assistant")
+        self.assertFalse(unopened["state"]["started"])
 
     def test_placeholder_rendering_is_recursive(self) -> None:
         config = {"actors": {"user": "Player", "assistant": "Partner"}}

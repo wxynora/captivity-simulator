@@ -57,7 +57,7 @@ def create_app() -> Flask:
         config = load_config()
         payload = run_command("status", save_path=_save_path(save_id))
         player_message = str(body.get("message") or "")
-        prompt = build_assistant_prompt(payload, config)
+        prompt = build_assistant_prompt(payload, config, message=player_message)
         try:
             reply_text = request_assistant(prompt, config, player_message=player_message)
         except AdapterError as exc:
