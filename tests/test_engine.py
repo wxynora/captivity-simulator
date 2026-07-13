@@ -45,6 +45,25 @@ class EngineTest(unittest.TestCase):
         value = {"line": "{user} / {assistant}", "items": ["{assistant}"]}
         self.assertEqual(render_placeholders(value, config), {"line": "Player / Partner", "items": ["Partner"]})
 
+    def test_assistant_prompt_hides_internal_route_labels(self) -> None:
+        config = {
+            "actors": {"user": "Player", "assistant": "Partner"},
+            "prompt": {"route_openings": {"capture_assistant": "你被 Player 留在这里。"}},
+        }
+        payload = {
+            "captive_view": {
+                "captive": "assistant",
+                "route": "capture_assistant",
+                "pending_event": {"type": "action_response", "actor": "assistant"},
+            },
+            "text": "【囚禁模拟器】\n等待回应。\n\n路线：囚禁 Partner\n被囚禁方：Partner\n状态：健康 80",
+        }
+        prompt = build_assistant_prompt(payload, config)
+        self.assertIn("你被 Player 留在这里。", prompt)
+        self.assertIn("状态：健康 80", prompt)
+        self.assertNotIn("路线：", prompt)
+        self.assertNotIn("被囚禁方：", prompt)
+
     def test_directive_parser_uses_pending_context(self) -> None:
         payload = {"state": {"pending_event": {"type": "escape_choice"}}}
         self.assertEqual(directive_to_command("【选择：escape】", payload), "resolve_escape_choice escape")

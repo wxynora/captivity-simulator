@@ -38,6 +38,15 @@ def _assistant_view(payload: dict[str, Any]) -> dict[str, Any]:
     return captor if str(captor.get("captor") or "") == "assistant" else captive
 
 
+def _clean_game_text(value: Any) -> str:
+    hidden_prefixes = ("路线：", "被囚禁方：")
+    return "\n".join(
+        line
+        for line in str(value or "").splitlines()
+        if not line.strip().startswith(hidden_prefixes)
+    ).strip()
+
+
 def _current_event_lines(pending: dict[str, Any]) -> list[str]:
     event = pending.get("event") if isinstance(pending.get("event"), dict) else {}
     lines: list[str] = []
@@ -116,7 +125,7 @@ def build_assistant_prompt(payload: dict[str, Any], config: dict[str, Any], mess
     opening = str(openings.get(route) or "")
     process_style = str(prompt_config.get("process_style") or "")
     extra_rules = prompt_config.get("extra_rules") if isinstance(prompt_config.get("extra_rules"), list) else []
-    game_text = str(payload.get("text") or payload.get("player_text") or "").strip()
+    game_text = _clean_game_text(payload.get("text") or payload.get("player_text"))
     parts = [opening, "", "【当前游戏状态】", game_text]
     event_lines = _current_event_lines(pending)
     if event_lines:
