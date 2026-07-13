@@ -1002,10 +1002,21 @@ function timeSegmentLabel(view: CaptivityView, pending: CaptivityPending | null)
   const phase = String(view.phase || "day");
   if (view.game_over || phase === "ending") return "结局";
   if (phase === "night") return "晚上";
+  const sceneTitle = textLine(view.scene_copy?.title);
+  if (["翌日", ...DAY_SEGMENT_LABELS].includes(sceneTitle)) return sceneTitle;
+  const waitingForPlan = Number(view.day_action_count || 0) === 0
+    && !(view.day_plan || []).length
+    && (!pending || String(pending.type || "") === "day_plan_choice");
+  if (waitingForPlan) return Number(view.current_day || 1) > 1 ? "翌日" : "待安排";
   const limit = Math.max(1, Number(view.day_action_limit || 3));
   const pendingSlot = Number(pending?.slot || 0);
   const completed = Number(view.day_action_count || 0);
-  const currentSlot = pendingSlot > 0 ? pendingSlot : Math.min(completed + 1, limit);
+  const latestEvent = (view.event_log || []).at(-1);
+  const completedSlot = Number(latestEvent?.slot || 0);
+  const pendingType = String(pending?.type || "");
+  const currentSlot = (pendingType === "advance_action" || pendingType === "advance_to_night") && completedSlot > 0
+    ? completedSlot
+    : pendingSlot > 0 ? pendingSlot : Math.min(completed + 1, limit);
   return DAY_SEGMENT_LABELS[currentSlot - 1] || `第 ${currentSlot} 段`;
 }
 
@@ -1696,6 +1707,7 @@ const PENDING_LABELS: Record<string, string> = {
   process_reaction_write: "等待{assistant}写下回应、过程和心情。",
   reaction_choice: "过程已经归档，选择此刻心情。",
   advance_action: "这一段已结束，可以推进下一段行动。",
+  advance_to_night: "第三段已结束，看完后可以进入夜间。",
   night_action_choice: "选择今晚的自由行动。",
   bell_voice_reveal: "按铃记录已生成，预录台词正在播放。",
   bell_response_choice: "等待{assistant}决定是否过去。",
@@ -2531,6 +2543,7 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
   const lastSceneKeyRef = useRef("");
   const lastProcessTransitionKeyRef = useRef("");
   const sceneTransitionTimerRef = useRef<number | null>(null);
+  const sceneTransitionCompleteRef = useRef<(() => void) | null>(null);
   const previewSyncReadyAtRef = useRef(0);
   const lastFailedRetryRef = useRef<(() => void) | null>(null);
   const mainScreenRef = useRef<HTMLElement | null>(null);
@@ -2606,21 +2619,29 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       sceneTransitionTimerRef.current = null;
     }
     setSceneTransition(null);
+    const onComplete = sceneTransitionCompleteRef.current;
+    sceneTransitionCompleteRef.current = null;
+    onComplete?.();
   }, []);
 
-  const playSceneTransition = useCallback((scene: SceneCopy) => {
+  const playSceneTransition = useCallback((scene: SceneCopy, onComplete?: () => void) => {
     if (sceneTransitionTimerRef.current !== null) {
       window.clearTimeout(sceneTransitionTimerRef.current);
     }
+    sceneTransitionCompleteRef.current = onComplete || null;
     setSceneTransition(scene);
     sceneTransitionTimerRef.current = window.setTimeout(() => {
       sceneTransitionTimerRef.current = null;
       setSceneTransition(null);
+      const complete = sceneTransitionCompleteRef.current;
+      sceneTransitionCompleteRef.current = null;
+      complete?.();
     }, sceneTransitionDuration(scene));
   }, []);
 
   useEffect(() => () => {
     if (sceneTransitionTimerRef.current !== null) window.clearTimeout(sceneTransitionTimerRef.current);
+    sceneTransitionCompleteRef.current = null;
   }, []);
 
   const runWithWait = useCallback(async (
@@ -2823,7 +2844,6 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       () => executeCaptivityCommand(`new_game route=${nextRoute}`),
     ).then((next) => {
       if (!next) return;
-      lastSceneKeyRef.current = String(viewFromPayload(next).scene_copy?.key || "");
       setScreen("game");
       setFooterTab("status");
       setPlanSlots(defaultPlanSlots());
@@ -3256,21 +3276,32 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
     });
   }
 
-  function continueAutomaticSync(next: CaptivityPayload | null, force = false, background = false, playerMessage = "") {
-    if (!next) return;
+  function continueAutomaticSync(next: CaptivityPayload | null, force = false, background = false, playerMessage = ""): boolean {
+    if (!next) return false;
     const nextView = viewFromPayload(next);
     const nextPendingType = String(nextView.pending_event?.type || "");
-    if (nextPendingType === "bell_voice_reveal" || nextPendingType === "item_secret_reveal") return;
+    if (nextPendingType === "bell_voice_reveal" || nextPendingType === "item_secret_reveal") return false;
     const waitingForAssistantNext = String(nextView.pending_event?.actor || "") === "assistant";
     const endingNext = String(nextView.phase || "") === "ending" || nextPendingType.startsWith("ending_") || Boolean(nextView.ending_state);
-    if (!force && !waitingForAssistantNext && !endingNext) return;
-    syncAssistant(endingNext ? "ending" : "state_update", next, background, playerMessage);
+    if (!force && !waitingForAssistantNext && !endingNext) return false;
+    const runSync = () => syncAssistant(endingNext ? "ending" : "state_update", next, background, playerMessage);
+    const scene = nextView.scene_copy;
+    const sceneKey = String(scene?.key || "");
+    if (scene && sceneKey && sceneKey !== lastSceneKeyRef.current) {
+      lastSceneKeyRef.current = sceneKey;
+      playSceneTransition(scene, runSync);
+      return true;
+    }
+    runSync();
+    return true;
   }
 
   function playNextStageForPayload(next: CaptivityPayload) {
-    const backendSceneKey = String(viewFromPayload(next).scene_copy?.key || "");
+    const nextView = viewFromPayload(next);
+    const backendScene = nextView.scene_copy;
+    const backendSceneKey = String(backendScene?.key || "");
     if (backendSceneKey) lastSceneKeyRef.current = backendSceneKey;
-    playSceneTransition(nextStageTransition(next));
+    playSceneTransition(backendScene || nextStageTransition(next));
   }
 
   function syncAssistant(
@@ -3407,10 +3438,11 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
           if (review) {
             setProcessReview(review);
             setFooterTab("history");
-          } else {
+          } else if (!continueAutomaticSync(next)) {
             playNextStageForPayload(next);
+          } else {
+            return;
           }
-          continueAutomaticSync(next);
         });
       } else if (payload) {
         playNextStageForPayload(payload);
@@ -3427,16 +3459,18 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       setReactionLine("");
       setProcessReview(null);
       setFooterTab("status");
-      playNextStageForPayload(next);
-      continueAutomaticSync(next, Boolean(playerLine), false, playerLine);
+      if (!continueAutomaticSync(next, Boolean(playerLine), false, playerLine)) {
+        playNextStageForPayload(next);
+      }
     });
   }
 
   function advanceDayAction() {
     if (previewRole) return;
+    const enteringNight = pendingType === "advance_to_night";
     void runWithWait(
-      "正在推进下一段行动...",
-      "STATUS: ADVANCING SLOT",
+      enteringNight ? "正在进入夜间..." : "正在推进下一段行动...",
+      enteringNight ? "STATUS: ENTERING NIGHT" : "STATUS: ADVANCING SLOT",
       () => executeCaptivityCommand("advance_day_action"),
     ).then((next) => {
       if (!next) return;
@@ -3444,10 +3478,11 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       if (review) {
         setProcessReview(review);
         setFooterTab("history");
-      } else {
+      } else if (!continueAutomaticSync(next)) {
         playNextStageForPayload(next);
+      } else {
+        return;
       }
-      continueAutomaticSync(next);
     });
   }
 
@@ -3685,6 +3720,8 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
   }
 
   function openMonitor(style: "occasional" | "full") {
+    setInventoryRoomOpen(false);
+    setMonitorRoomOpen(true);
     if (previewRole) return;
     void runWithWait(
       "正在打开监控...",
@@ -6101,9 +6138,10 @@ function RuntimePanel({
   const isEnding = String(view.phase || "") === "ending" || Boolean(view.ending_state);
   const isNightSelfChoice = pendingType === "night_action_choice" && userIsPendingActor;
   const petRulePrompt = view.status_flags?.find((item) => item.id === "pet_identity_active")?.prompt || "";
+  const isCaptorCompletedResponse = (pendingType === "advance_action" || pendingType === "advance_to_night") && role === "captor";
   const activeTitle = isNightSelfChoice
     ? "你的安排"
-    : pendingType === "advance_action" && role === "captor"
+    : isCaptorCompletedResponse
       ? "{assistant}的回应"
     : pendingType === "recapture_rules_choice"
       ? "重新立规矩"
@@ -6126,6 +6164,7 @@ function RuntimePanel({
     || (event.feeding && Object.keys(event.feeding).length),
   );
   const staleDayEventAtNight = String(view.phase || "") === "night" && String(event.phase || "") === "day";
+  const showCaptorCompletedResponse = isCaptorCompletedResponse;
   const showActiveCard = Boolean(pending || hasEventDetail || isEnding)
     && !isNightSelfChoice
     && !staleDayEventAtNight
@@ -6167,27 +6206,46 @@ function RuntimePanel({
           <div className="panel-title">
             {activeTitle} <span className="sub">EVENT</span>
           </div>
-          <div className="action-card">
-            <div className="action-metadata">
-              {activeTaskMeta(event, pending, view, role)}
+          {showCaptorCompletedResponse ? (
+            <>
+              <div className="action-card captor-response-card">
+                <div className="event-main">
+                  {event.action_response?.line || `{assistant}选择了${event.action_response?.response_label || "回应"}。`}
+                </div>
+                {event.assistant_feedback_text ? (
+                  <>
+                    <div className="divider" />
+                    <div className="process-text action-feedback-body">{event.assistant_feedback_text}</div>
+                  </>
+                ) : null}
+              </div>
+              <div className="action-card captor-action-record-card">
+                <div className="action-metadata">
+                  {activeTaskMeta(event, pending, view, role)}
+                </div>
+                <div className="event-sub">
+                  {renderEventSummary(event, pending, view, role)}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="action-card">
+              <div className="action-metadata">
+                {activeTaskMeta(event, pending, view, role)}
+              </div>
+              <div className="event-main">
+                {pendingType === "escape_choice" && waitingForAssistant
+                  ? "逃跑诱导已经送达{assistant}。"
+                  : isRecaptureDecision
+                    ? pendingLabel(pending, role)
+                    : event.line || event.action_label || publicDirectiveText(pending?.required_directive, pending, role) || (isEnding ? "30 天闭环已完成，等待结局。" : "等待下一段事件。")}
+              </div>
+              <div className="divider" />
+              <div className="event-sub">
+                {renderEventSummary(event, pending, view, role)}
+              </div>
             </div>
-            <div className="event-main">
-              {pendingType === "escape_choice" && waitingForAssistant
-                ? "逃跑诱导已经送达{assistant}。"
-                : pendingType === "advance_action" && role === "captor"
-                  ? event.action_response?.line || `{assistant}选择了${event.action_response?.response_label || "回应"}。`
-                : isRecaptureDecision
-                  ? pendingLabel(pending, role)
-                : event.line || event.action_label || publicDirectiveText(pending?.required_directive, pending, role) || (isEnding ? "30 天闭环已完成，等待结局。" : "等待下一段事件。")}
-            </div>
-            <div className="divider" />
-            {pendingType === "advance_action" && role === "captor" && event.assistant_feedback_text ? (
-              <div className="process-text action-feedback-body">{event.assistant_feedback_text}</div>
-            ) : null}
-            <div className="event-sub">
-              {renderEventSummary(event, pending, view, role)}
-            </div>
-          </div>
+          )}
         </>
       ) : null}
 
@@ -6289,10 +6347,14 @@ function RuntimePanel({
         />
       ) : null}
 
-      {pendingType === "advance_action" && userIsPendingActor ? (
+      {(pendingType === "advance_action" || pendingType === "advance_to_night") && userIsPendingActor ? (
         <>
-          <div className="panel-title">推进 <span className="sub">NEXT_SLOT</span></div>
-          <button className="btn btn-large" type="button" disabled={disabled} onClick={onAdvance}>推进下一段行动</button>
+          <div className="panel-title">
+            {pendingType === "advance_to_night" ? "夜间" : "推进"} <span className="sub">{pendingType === "advance_to_night" ? "NIGHT" : "NEXT_SLOT"}</span>
+          </div>
+          <button className="btn btn-large" type="button" disabled={disabled} onClick={onAdvance}>
+            {pendingType === "advance_to_night" ? "进入夜间" : "推进下一段行动"}
+          </button>
         </>
       ) : null}
 

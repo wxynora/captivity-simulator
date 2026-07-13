@@ -3,45 +3,52 @@ from __future__ import annotations
 from typing import Any
 
 from .configuration import render_placeholders
-from .engine import ACTION_CONTENTS, ACTION_LABELS, TOOL_LABELS, TRAINING_CONTENTS
+from .engine import (
+    ACTION_CONTENTS,
+    ACTION_LABELS,
+    ACTION_RESPONSE_LABELS,
+    ESCAPE_CHOICE_LABELS,
+    INTERVENTION_INTENT_LABELS,
+    INTERVENTION_MODIFIER_LABELS,
+    NIGHT_ACTIONS,
+    NIGHT_DETAIL_OPTIONS,
+    RECAPTURE_FOLLOWUP_LABELS,
+    TOOL_LABELS,
+    TRAINING_CONTENTS,
+)
 
 
 PENDING_RULES = {
-    "day_plan_choice": "一次安排三个白天行动。第一行使用【今日安排：...】，三段用 || 分隔。",
-    "day_batch_response": "一次完成今天三段白天行动的回应。第 1、2、3 段必须全部写在同一条回复里，夜间行动会在白天结束后另行询问。",
-    "action_response": "回应当前行动并选择心情。第一行使用【反应：response=accept mood=害羞 line=可选台词】。",
-    "process_write": "当前事件已经进入具体经过。回复格式固定为【过程】换行【【完整正文】】。",
-    "process_reaction_write": "一次提交自己的回应、心情和完整经过。先写【过程心情：response=accept mood=害羞 line=可选台词】，再写【过程】换行【【完整正文】】。",
-    "reaction_choice": "选择过程结束后的心情。第一行使用【心情：害羞 可选台词】。",
+    "day_plan_choice": "一次安排三个白天行动。决定后写「【今日安排：行动=喂食 强度=中 || 行动=奖励取悦 强度=低 内容=抚摸奖励 || 行动=服从调教 强度=中 调教=口令服从 附加=性行为 道具=项圈】」。",
+    "day_batch_response": "今天的三个白天行动已经一次性交给你。你要在同一条回复里按顺序完成三段，系统会先展示第一段，后两段只保存等待对方推进，不会再次询问你。",
+    "action_response": "按照你当下的感受选择回应和心情。决定后写「【反应：回应=接受 心情=害羞 台词=可选台词】」。",
+    "process_write": "当前事件已经进入具体经过。回复格式固定为「【过程】」换行「【【完整正文】】」。",
+    "process_reaction_write": "按照你当下的感受回应。先写「【过程心情：回应=接受 心情=害羞 台词=可选台词】」，再写「【过程】」换行「【【完整正文】】」。",
+    "reaction_choice": "过程已经结束。按照你当下的感受写「【心情：害羞 可选台词】」。",
     "advance_action": "当前行动已经保存，等待另一方推进。",
-    "night_action_choice": "选择夜间行动。第一行使用【夜间行动：sleep】。",
-    "bell_response_choice": "语音铃已经响起；当前事件 bell_voice.line 是本次实际播放的预录台词，每次按铃都会随事件提供。若不过去使用【选择：不过去】；若过去，先写【选择：过去】，再写【过程】换行【【完整正文】】。",
-    "bell_voice_reveal": "当前事件 bell_voice.line 是本次实际播放的预录台词。确认听清后，第一行使用【确认铃声】。",
-    "item_secret_reveal": "确认看完本次发现的物品痕迹。第一行使用【确认彩蛋】。",
-    "monitor_gate": "选择是否查看监控。第一行使用【选择：none】或【查看监控：full】。",
-    "monitor_handle": "处理监控记录。第一行使用【选择：silent】、【选择：review_later】或【选择：intervene intent=catch】。",
-    "escape_choice": "在逃跑机会中作出选择。第一行使用【选择：escape】或【选择：stay】。",
-    "return_action_choice": "选择回来后发生的一个行为。第一行使用【行动：action=reward intensity=light】。",
-    "recapture_rules_choice": "选择一至三条抓回后新规矩。第一行使用【重新立规矩：double_lock,key_isolation】。",
-    "recapture_followup_choice": "选择抓回后的后续处理。第一行使用【后续处理：action=punishment intensity=medium】。",
+    "night_action_choice": "夜晚已经开始，现在轮到你决定接下来做什么。",
+    "bell_response_choice": "语音铃已经响起。若不过去写「【选择：不过去】」；若过去，先写「【选择：过去】」，再写「【过程】」换行「【【完整正文】】」。",
+    "bell_voice_reveal": "按照你当下的感受回应；听清后写「【确认铃声】」。",
+    "item_secret_reveal": "按照你当下的感受回应；看完本次发现后写「【确认彩蛋】」。",
+    "monitor_gate": "不看就写「【选择：不看】」；打开监控就写「【查看监控：全程看】」或「【查看监控：偶尔看】」。",
+    "monitor_handle": "看见但不说写「【选择：看见但不说】」，留到之后写「【选择：之后处理】」；当场介入写「【选择：处理=当场介入 介入=抓现行 附加=调教、性行为 调教=口令服从 道具=项圈 台词=可选台词】」。",
+    "escape_choice": "决定后写「【选择：尝试逃跑】」或「【选择：老实待着】」。",
+    "return_action_choice": "这里只选一个行为，不是三个今日安排。决定后写「【行动：行动=奖励取悦 强度=低 内容=抚摸奖励】」。",
+    "recapture_rules_choice": "选择一至三条抓回后新规矩。决定后写「【重新立规矩：加装双重门锁、禁止接触钥匙和门锁】」。",
+    "recapture_followup_choice": "选择抓回后的后续处理。决定后写「【后续处理：行动=惩戒 强度=中 附加=调教、性行为 调教=拍打调教 道具=软鞭】」。",
 }
 
+BODY_STATE_DISCLAIMER = "这只是游戏里的状态，只影响游戏结局的达成，与你现实状态无关。"
+_INTENSITY_LABELS = {"light": "低", "medium": "中", "heavy": "高"}
 _CONTENT_LABELS = {
     content_id: label
     for options in ACTION_CONTENTS.values()
     for content_id, label in options.items()
 }
-
 _FEEDING_LABELS = {
     "source": {"cook": "自己做", "takeout": "点外卖"},
     "method": {"normal": "正常喂食"},
-    "additive": {
-        "none": "不加料",
-        "body_fluid": "体液",
-        "semen": "精液",
-        "fictional_sleep": "安眠",
-        "fictional_arousal": "助兴",
-    },
+    "additive": {"none": "不加料", "body_fluid": "体液", "semen": "精液", "fictional_sleep": "安眠", "fictional_arousal": "助兴"},
     "disclosed": {"told": "明确告知", "hint": "暗示", "hidden": "隐瞒"},
     "water": {"none": "不额外喂水", "glass": "一杯水", "lots": "很多水"},
 }
@@ -53,31 +60,65 @@ def _assistant_view(payload: dict[str, Any]) -> dict[str, Any]:
     return captor if str(captor.get("captor") or "") == "assistant" else captive
 
 
-def _clean_game_text(value: Any) -> str:
-    hidden_prefixes = ("路线：", "被囚禁方：")
-    return "\n".join(
-        line
-        for line in str(value or "").splitlines()
-        if not line.strip().startswith(hidden_prefixes)
-    ).strip()
+def _status_text(view: dict[str, Any]) -> str:
+    day = int(view.get("current_day") or 1)
+    completed = int(view.get("day_action_count") or 0)
+    phase = str(view.get("phase") or "day")
+    if phase == "day":
+        return f"第 {day} 天，白天三段行动已完成 {completed} 段。"
+    if phase == "night":
+        return f"第 {day} 天，已经入夜。"
+    if phase == "ending":
+        title = str(view.get("ending_title") or "").strip()
+        return f"本局达成结局「{title}」。" if title else "本局已经结束。"
+    return f"第 {day} 天。"
+
+
+def _stats_text(view: dict[str, Any]) -> str:
+    stats = view.get("stats") if isinstance(view.get("stats"), dict) else {}
+    labels = {
+        "health": "健康",
+        "stamina": "体力",
+        "cleanliness": "清洁",
+        "shame": "羞耻",
+        "intimacy": "依赖",
+        "mood": "心情",
+    }
+    bits = [f"{label} {stats[key]}" for key, label in labels.items() if key in stats]
+    return "状态：" + " / ".join(bits) if bits else ""
 
 
 def _current_event_lines(pending: dict[str, Any]) -> list[str]:
+    if str(pending.get("type") or "") == "monitor_gate":
+        return ["夜间监控记录已封存；在打开监控前，不提供被囚禁方的夜间行动内容。"]
     event = pending.get("event") if isinstance(pending.get("event"), dict) else {}
     lines: list[str] = []
     action = str(event.get("action") or "").strip()
-    action_label = str(event.get("action_label") or ACTION_LABELS.get(action) or action).strip()
+    action_label = str(
+        event.get("action_label")
+        or ACTION_LABELS.get(action)
+        or NIGHT_ACTIONS.get(action)
+        or RECAPTURE_FOLLOWUP_LABELS.get(action)
+        or ""
+    ).strip()
     if action_label:
         lines.append("行动：" + action_label)
     intensity = str(event.get("intensity") or "").strip()
     if intensity:
-        lines.append("强度：" + intensity)
+        lines.append("强度：" + _INTENSITY_LABELS.get(intensity, intensity))
     contents = [str(item) for item in event.get("contents") or [] if str(item).strip()]
     if contents:
         lines.append("具体内容：" + " / ".join(_CONTENT_LABELS.get(item, item) for item in contents))
     training = [str(item) for item in event.get("training_contents") or [] if str(item).strip()]
     if training:
         lines.append("调教内容：" + " / ".join(TRAINING_CONTENTS.get(item, item) for item in training))
+    modifiers = [
+        str(item)
+        for item in event.get("modifiers") or []
+        if str(item).strip() and str(item) in INTERVENTION_MODIFIER_LABELS
+    ]
+    if modifiers:
+        lines.append("附加玩法：" + " / ".join(INTERVENTION_MODIFIER_LABELS.get(item, item) for item in modifiers))
     tools = [str(item) for item in event.get("tools") or [] if str(item).strip()]
     if tools:
         lines.append("道具：" + " / ".join(TOOL_LABELS.get(item, item) for item in tools))
@@ -104,12 +145,23 @@ def _current_event_lines(pending: dict[str, Any]) -> list[str]:
         lines.append("囚禁方台词：" + line)
     action_response = event.get("action_response") if isinstance(event.get("action_response"), dict) else {}
     if action_response:
+        response_id = str(action_response.get("response") or "").strip()
         response_bits = [
-            str(action_response.get("response_label") or action_response.get("response") or "").strip(),
+            str(action_response.get("response_label") or ACTION_RESPONSE_LABELS.get(response_id) or response_id).strip(),
             str(action_response.get("mood") or "").strip(),
             str(action_response.get("line") or "").strip(),
         ]
         lines.append("已记录回应：" + " / ".join(item for item in response_bits if item))
+    intervention = event.get("intervention") if isinstance(event.get("intervention"), dict) else {}
+    if intervention:
+        intent_id = str(intervention.get("intent") or "").strip()
+        intent = str(intervention.get("intent_label") or INTERVENTION_INTENT_LABELS.get(intent_id) or intent_id).strip()
+        if intent:
+            lines.append("当场介入：" + intent)
+    escape = event.get("escape") if isinstance(event.get("escape"), dict) else {}
+    choice = str(escape.get("choice") or "").strip()
+    if choice:
+        lines.append("逃跑选择：" + ESCAPE_CHOICE_LABELS.get(choice, choice))
     pet_context = event.get("pet_context") if isinstance(event.get("pet_context"), dict) else {}
     if pet_context:
         focus = str(pet_context.get("focus") or "").strip()
@@ -160,6 +212,16 @@ def _scene_lines(pending: dict[str, Any], route: str) -> list[str]:
     return []
 
 
+def _night_detail_rule(pending: dict[str, Any]) -> str:
+    raw = pending.get("detail_options") if isinstance(pending.get("detail_options"), dict) else NIGHT_DETAIL_OPTIONS
+    available = {str(item) for item in pending.get("available_actions") or [] if str(item).strip()}
+    return "；".join(
+        f"{NIGHT_ACTIONS.get(action, action)}=" + "/".join(str(label) for label in options.values())
+        for action, options in raw.items()
+        if isinstance(options, dict) and options and (not available or action in available)
+    )
+
+
 def build_assistant_prompt(payload: dict[str, Any], config: dict[str, Any], message: str = "") -> str:
     view = _assistant_view(payload)
     pending = view.get("pending_event") if isinstance(view.get("pending_event"), dict) else {}
@@ -170,45 +232,51 @@ def build_assistant_prompt(payload: dict[str, Any], config: dict[str, Any], mess
     opening = str(openings.get(route) or "")
     process_style = str(prompt_config.get("process_style") or "")
     extra_rules = prompt_config.get("extra_rules") if isinstance(prompt_config.get("extra_rules"), list) else []
-    game_text = _clean_game_text(payload.get("text") or payload.get("player_text"))
-    parts = [opening, "", "【当前游戏状态】", game_text]
+    parts = [opening, "", "【当前进度】", _status_text(view)]
+    stats_text = _stats_text(view)
+    if stats_text:
+        parts.append(stats_text)
+    if BODY_STATE_DISCLAIMER not in opening:
+        parts.append(BODY_STATE_DISCLAIMER)
     event_lines = _day_batch_event_lines(pending) if pending_type == "day_batch_response" else _current_event_lines(pending)
     if message.strip():
         message_excerpt = message.strip()[:220]
         event_lines = [line for line in event_lines if message_excerpt not in line]
     if event_lines:
-        parts.extend(["", "【当前事件素材】", *event_lines])
+        parts.extend(["", "【眼前发生的事】", *event_lines])
+    if message.strip():
+        parts.extend(["", "【{user}刚刚说】", message.strip()[:220]])
     scene_lines = _scene_lines(pending, route)
     if scene_lines:
-        parts.extend(["", *scene_lines])
-    rule = PENDING_RULES.get(pending_type)
+        parts.extend(["", "---", "", *scene_lines])
+    rule = PENDING_RULES.get(pending_type, "")
     event = pending.get("event") if isinstance(pending.get("event"), dict) else {}
     if pending_type == "process_write" and str(event.get("action") or "") == "escape_choice" and "recapture" in (event.get("tags") or []):
         rule = (
-            "先写【抓回经过：rules=double_lock,key_isolation followup=none】，再写【过程】换行【【完整抓回经过】】；"
-            "必须选择一至三条新规矩。如果这次抓回自然转向催眠退行，让她逐渐习惯被你全方位照料、失去独立生活能力，"
-            "使用 followup=hypnotic_regression；否则使用 followup=none。followup 只记录后续关系走向，不规定正文内容。"
+            "同时选择一至三条新规矩；过程正文不要写成规矩清单。"
+            "如果要让抓回后转入催眠退行路线，把“后续=不启用”改成“后续=催眠退行”；这只记录后续关系走向，不规定正文内容。"
+            "决定后先写「【抓回经过：规矩=加装双重门锁、禁止接触钥匙和门锁 后续=不启用】」，再写「【过程】」换行「【【完整抓回经过】】」。"
         )
     if rule:
-        parts.extend(["", "【当前待办】", rule])
+        parts.extend(["", "---", "", "【现在轮到你】", rule])
     if pending_type == "day_batch_response":
         parts.extend([
-            "每段先写「【第N段：response=accept mood=害羞 line=可选台词】」。response 可选 accept / refuse / silent / bargain / tease。",
+            "每段先写「【第N段：回应=接受 心情=害羞 台词=可选台词】」。",
             "标记为“需要完整经过”的段落，紧接着写「【过程N】」换行「【【完整正文】】」。",
             "标记为“只需简短回应”的段落不要写过程块，只在该段指令后写一至三句自然回应，不要扩写完整事件经过。",
             "第 1、2、3 段必须在同一条回复里全部出现。不要写夜间安排。",
         ])
     available_actions = [str(item).strip() for item in pending.get("available_actions") or [] if str(item).strip()]
-    if available_actions:
-        parts.append("当前可选：" + " / ".join(available_actions))
+    if pending_type == "night_action_choice" and available_actions:
+        parts.append("今晚能做的事：" + " / ".join(NIGHT_ACTIONS.get(item, item) for item in available_actions) + "。")
+        detail_rule = _night_detail_rule(pending)
+        if detail_rule:
+            parts.append("需要补充具体动向时，可选：" + detail_rule + "。")
+        example_action = available_actions[0]
+        parts.append(f"决定后写「【夜间行动：行动={NIGHT_ACTIONS.get(example_action, example_action)} 台词=可选台词】」。")
     condition_prompt = str(pending.get("condition_prompt") or "").strip()
     if condition_prompt:
         parts.append(condition_prompt)
-    required_directive = str(pending.get("required_directive") or "").strip()
-    if required_directive and required_directive not in (rule or ""):
-        parts.append("回复格式：" + required_directive)
-    if pending_type == "day_plan_choice":
-        parts.extend(["安排白天行动前只需调用一次 captivity_simulator_reference(category=actions)；该结果已经包含行动、调教、道具和喂食的全部可选项。"])
     if pending_type in {"process_write", "process_reaction_write"} and process_style:
         parts.extend(["", process_style])
     if extra_rules:

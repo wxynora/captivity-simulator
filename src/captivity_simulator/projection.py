@@ -45,6 +45,9 @@ def project_payload(
     if not isinstance(raw_view, dict):
         raw_view = payload.get("state") if isinstance(payload.get("state"), dict) else {}
     view = deepcopy(raw_view)
+    pending = view.get("pending_event") if isinstance(view.get("pending_event"), dict) else None
+    if pending:
+        pending.pop("required_directive", None)
 
     result: dict[str, Any] = {
         "ok": bool(payload.get("ok")),

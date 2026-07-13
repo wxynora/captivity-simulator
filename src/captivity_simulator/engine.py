@@ -2287,11 +2287,11 @@ def _consume_next_day_batch_result(state: dict[str, Any]) -> tuple[bool, list[st
     state["mood_line"] = line
     _attach_pet_context(state, event)
     _resolve_event(state, event)
-    _advance_after_day_event(state)
+    _advance_after_day_event(state, hold_before_night=True)
     slot = int(event.get("slot") or state.get("day_action_count") or 0)
-    if str(state.get("phase") or "") == "night":
-        _maybe_create_night_action_choice_pending(state)
-        return True, [f"第 {slot} 段已展示，今天白天行动全部完成；进入夜间并等待被囚禁方选择晚间安排。"]
+    if int(state.get("day_action_count") or 0) >= DAY_ACTIONS:
+        _maybe_create_advance_to_night_pending(state)
+        return True, [f"第 {slot} 段已展示，今天三个白天行动全部完成；等待囚禁方看完后进入夜间。"]
     _maybe_create_advance_action_pending(state)
     return True, [f"第 {slot} 段已展示；下一段已经写好，等待囚禁方推进。"]
 
@@ -2577,12 +2577,19 @@ def _advance_day_action(state: dict[str, Any]) -> tuple[bool, list[str]]:
     if state.get("game_over") or str(state.get("phase") or "") != "day":
         return False, ["当前不能推进白天行动。"]
     pending = state.get("pending_event") if isinstance(state.get("pending_event"), dict) else None
+    pending_type = str((pending or {}).get("type") or "")
     if pending:
-        if str(pending.get("type") or "") != "advance_action":
+        if pending_type not in {"advance_action", "advance_to_night"}:
             return False, ["当前有待处理事件，先处理 pending。"]
         state["pending_event"] = None
     if str(state.get("captor") or "") != "user":
         return False, ["当前路线不需要囚禁方手动推进下一行动。"]
+    if pending_type == "advance_to_night":
+        if int(state.get("day_action_count") or 0) < DAY_ACTIONS:
+            return False, ["白天行动尚未全部展示，不能进入夜间。"]
+        _enter_night_phase(state)
+        _maybe_create_night_action_choice_pending(state)
+        return True, ["第三段已经看完，进入夜间并等待被囚禁方选择晚间安排。"]
     if state.get("day_batch_results"):
         return _consume_next_day_batch_result(state)
     return _continue_day_plan(state)
@@ -3718,15 +3725,19 @@ def _resolve_event(state: dict[str, Any], event: dict[str, Any]) -> None:
     state["event_log"].append(deepcopy(event))
 
 
-def _advance_after_day_event(state: dict[str, Any]) -> None:
+def _enter_night_phase(state: dict[str, Any]) -> None:
     day = int(state.get("current_day") or 1)
+    _advance_bladder_pressure(state, None, reason="night")
+    _mark_deferred_monitor_materials_used_for_day(state, day)
+    state["phase"] = "night"
+    state["day_plan"] = []
+    state["day_batch_results"] = []
+
+
+def _advance_after_day_event(state: dict[str, Any], *, hold_before_night: bool = False) -> None:
     state["day_action_count"] = min(DAY_ACTIONS, int(state.get("day_action_count") or 0) + 1)
-    if int(state.get("day_action_count") or 0) >= DAY_ACTIONS:
-        _advance_bladder_pressure(state, None, reason="night")
-        _mark_deferred_monitor_materials_used_for_day(state, day)
-        state["phase"] = "night"
-        state["day_plan"] = []
-        state["day_batch_results"] = []
+    if int(state.get("day_action_count") or 0) >= DAY_ACTIONS and not hold_before_night:
+        _enter_night_phase(state)
 
 
 def _maybe_create_day_plan_choice_pending(state: dict[str, Any]) -> None:
@@ -3772,6 +3783,26 @@ def _maybe_create_advance_action_pending(state: dict[str, Any]) -> None:
         "actor": "user",
         "captive": str(state.get("captive") or ""),
         "phase": "waiting_advance_action",
+        "required_directive": "advance_day_action",
+        "created_at": now_local_iso(),
+    }
+
+
+def _maybe_create_advance_to_night_pending(state: dict[str, Any]) -> None:
+    if state.get("pending_event") or state.get("game_over"):
+        return
+    if str(state.get("phase") or "") != "day" or str(state.get("captor") or "") != "user":
+        return
+    if int(state.get("day_action_count") or 0) < DAY_ACTIONS:
+        return
+    state["pending_event"] = {
+        "id": f"pending-{secrets.token_hex(4)}",
+        "type": "advance_to_night",
+        "day": int(state.get("current_day") or 1),
+        "slot": DAY_ACTIONS,
+        "actor": "user",
+        "captive": str(state.get("captive") or ""),
+        "phase": "waiting_night_transition",
         "required_directive": "advance_day_action",
         "created_at": now_local_iso(),
     }
@@ -4857,7 +4888,12 @@ def _scene_copy(state: dict[str, Any], status: dict[str, Any]) -> dict[str, str]
     pending_type = str(pending.get("type") or "")
     pending_slot = int(pending.get("slot") or 0)
     completed = int(state.get("day_action_count") or 0)
-    slot = pending_slot if pending_slot > 0 else min(completed + 1, DAY_ACTIONS)
+    latest_event = next((item for item in reversed(state.get("event_log") or []) if isinstance(item, dict)), {})
+    latest_slot = int(latest_event.get("slot") or 0)
+    if pending_type in {"advance_action", "advance_to_night"} and latest_slot > 0:
+        slot = latest_slot
+    else:
+        slot = pending_slot if pending_slot > 0 else min(completed + 1, DAY_ACTIONS)
     is_captive_route = route == "captured_by_assistant"
 
     special_copy = {
@@ -4895,6 +4931,28 @@ def _scene_copy(state: dict[str, Any], status: dict[str, Any]) -> dict[str, str]
             "title": title,
             "body": body,
             "tone": "special",
+        }
+
+    waiting_for_day_plan = (
+        phase == "day"
+        and completed == 0
+        and not state.get("day_plan")
+        and pending_type in {"", "day_plan_choice"}
+    )
+    if waiting_for_day_plan:
+        if day <= 1:
+            return None
+        body = (
+            "上一夜已经收进记录。日历翻到新的一页，今天的安排还没有送到房间里。"
+            if is_captive_route
+            else "上一夜已经收进记录。日历翻到新的一页，今天的三段安排仍在等你决定。"
+        )
+        return {
+            "key": f"day-{day}:next-day",
+            "kicker": f"DAY {day:02d} / NEXT DAY",
+            "title": "翌日",
+            "body": body,
+            "tone": "day",
         }
 
     if phase == "night":

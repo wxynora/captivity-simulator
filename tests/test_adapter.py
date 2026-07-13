@@ -35,7 +35,7 @@ class AdapterTest(unittest.TestCase):
                             "type": "function",
                             "function": {
                                 "name": "captivity_simulator_reference",
-                                "arguments": '{"category":"feeding"}',
+                                "arguments": '{"分类":"喂食"}',
                             },
                         }],
                     }

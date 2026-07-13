@@ -14,12 +14,18 @@ from captivity_simulator.reference import get_reference, reference_tool_schema
 
 class EngineTest(unittest.TestCase):
     def test_actions_reference_contains_complete_day_plan_catalog(self) -> None:
-        reference = get_reference("actions")
-        self.assertIn("actions", reference)
-        self.assertIn("training_contents", reference["training"])
-        self.assertIn("tools", reference["tools"])
-        self.assertIn("source", reference["feeding"])
-        self.assertIn("actions 会一次返回", reference_tool_schema()["function"]["description"])
+        reference = get_reference("白天安排")
+        self.assertIn("白天行动：", reference)
+        self.assertIn("调教内容：", reference)
+        self.assertIn("道具：", reference)
+        self.assertIn("来源：自己做、点外卖", reference)
+        self.assertIn("【今日安排：行动=喂食 强度=中", reference)
+        self.assertNotIn("training_contents", reference)
+        self.assertNotIn("fictional_sleep", reference)
+        schema = reference_tool_schema()["function"]
+        self.assertIn("白天安排”一次即可", schema["description"])
+        self.assertIn("分类", schema["parameters"]["properties"])
+        self.assertNotIn("category", schema["parameters"]["properties"])
 
     @staticmethod
     def _force_night(save_path: Path) -> None:
@@ -93,6 +99,7 @@ class EngineTest(unittest.TestCase):
             "captive_view": {
                 "captive": "assistant",
                 "route": "capture_assistant",
+                "stats": {"health": 80},
                 "pending_event": {"type": "action_response", "actor": "assistant"},
             },
             "text": "【囚禁模拟器】\n等待回应。\n\n路线：囚禁 Partner\n被囚禁方：Partner\n状态：健康 80",
@@ -102,28 +109,30 @@ class EngineTest(unittest.TestCase):
         self.assertIn("状态：健康 80", prompt)
         self.assertNotIn("路线：", prompt)
         self.assertNotIn("被囚禁方：", prompt)
+        self.assertNotIn("response=", prompt)
+        self.assertNotIn("action_response", prompt)
 
     def test_directive_parser_uses_pending_context(self) -> None:
         payload = {"state": {"pending_event": {"type": "escape_choice"}}}
-        self.assertEqual(directive_to_command("【选择：escape】", payload), "resolve_escape_choice escape")
+        self.assertEqual(directive_to_command("【选择：尝试逃跑】", payload), "resolve_escape_choice escape")
         process_payload = {"state": {"pending_event": {"type": "process_reaction_write"}}}
         self.assertEqual(
-            directive_to_command("【过程心情：response=accept mood=平静】\n【过程】\n【【正文】】", process_payload),
+            directive_to_command("【过程心情：回应=接受 心情=平静】\n【过程】\n【【正文】】", process_payload),
             "submit_process_reaction response=accept mood=平静 process='正文'",
         )
-        self.assertEqual(directive_to_command("【过程心情：response=accept mood=平静】\n正文", process_payload), "")
+        self.assertEqual(directive_to_command("【过程心情：回应=接受 心情=平静】\n正文", process_payload), "")
         write_payload = {"state": {"pending_event": {"type": "process_write"}}}
         self.assertEqual(directive_to_command("【过程】\n【【多段正文】】", write_payload), "submit_process 多段正文")
         self.assertEqual(
-            directive_to_command("【赠送物品：items=book book_title='夜航船' secret='痕迹一 || 痕迹二'】", write_payload),
-            "gift_item items=book book_title='夜航船' secret='痕迹一 || 痕迹二'",
+            directive_to_command("【赠送物品：书 书名=夜航船 彩蛋='痕迹一 || 痕迹二'】", write_payload),
+            "gift_item items=book book_title=夜航船 secret='痕迹一 || 痕迹二'",
         )
         self.assertEqual(
-            directive_to_command("【抓回经过：rules=double_lock,key_isolation】\n【过程】\n【【抓回正文】】", write_payload),
+            directive_to_command("【抓回经过：规矩=加装双重门锁、禁止接触钥匙和门锁】\n【过程】\n【【抓回正文】】", write_payload),
             "submit_recapture_process rules=double_lock,key_isolation || process='抓回正文'",
         )
         self.assertEqual(
-            directive_to_command("【抓回经过：rules=double_lock,key_isolation followup=hypnotic_regression】\n【过程】\n【【抓回正文】】", write_payload),
+            directive_to_command("【抓回经过：规矩=加装双重门锁、禁止接触钥匙和门锁 后续=催眠退行】\n【过程】\n【【抓回正文】】", write_payload),
             "submit_recapture_process rules=double_lock,key_isolation followup=hypnotic_regression || process='抓回正文'",
         )
         bell_payload = {"state": {"pending_event": {"type": "bell_response_choice"}}}
@@ -156,12 +165,15 @@ class EngineTest(unittest.TestCase):
             self.assertIn("第 1 段（只需简短回应）", prompt)
             self.assertIn("第 2 段（需要完整经过）", prompt)
             self.assertIn("第 1、2、3 段必须在同一条回复里全部出现", prompt)
+            self.assertIn("【第N段：回应=接受 心情=害羞", prompt)
+            self.assertNotIn("response=", prompt)
+            self.assertNotIn("training_contents", prompt)
 
             reply = (
-                "【第1段：response=accept mood=平静 line=】\n第一段简短回应。\n"
-                "【第2段：response=bargain mood=烦躁 line=别得意】\n"
+                "【第1段：回应=接受 心情=平静 台词=】\n第一段简短回应。\n"
+                "【第2段：回应=讨价还价 心情=烦躁 台词=别得意】\n"
                 "【过程2】\n【【第二段完整经过。】】\n"
-                "【第3段：response=silent mood=疲惫 line=】\n第三段简短回应。"
+                "【第3段：回应=沉默 心情=疲惫 台词=】\n第三段简短回应。"
             )
             command = directive_to_command(reply, planned)
             self.assertTrue(command.startswith("submit_day_batch payload="))
@@ -174,8 +186,11 @@ class EngineTest(unittest.TestCase):
             self.assertEqual(second["captor_view"]["pending_event"]["type"], "advance_action")
             third = run_command("advance_day_action", save_path)
             self.assertEqual(len(third["captor_view"]["event_log"]), 3)
-            self.assertEqual(third["captor_view"]["pending_event"]["type"], "night_action_choice")
-            self.assertEqual(third["captor_view"]["pending_event"]["actor"], "assistant")
+            self.assertEqual(third["captor_view"]["pending_event"]["type"], "advance_to_night")
+            self.assertEqual(third["captor_view"]["phase"], "day")
+            night = run_command("advance_day_action", save_path)
+            self.assertEqual(night["captor_view"]["pending_event"]["type"], "night_action_choice")
+            self.assertEqual(night["captor_view"]["pending_event"]["actor"], "assistant")
 
     def test_tool_only_process_rule_is_scoped_to_captured_route(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -251,11 +266,14 @@ class EngineTest(unittest.TestCase):
             "text": "status",
         }
         prompt = build_assistant_prompt(payload, config)
+        self.assertIn("这只是游戏里的状态，只影响游戏结局的达成，与你现实状态无关。", prompt)
         self.assertIn("Player今天试图逃离你的掌控", prompt)
         self.assertIn("你现在想对她做的事都从这一刻开始发生", prompt)
         self.assertIn("把你们之间发生的一切完整展开", prompt)
-        self.assertIn("【抓回经过：rules=double_lock,key_isolation followup=none】", prompt)
-        self.assertIn("hypnotic_regression", prompt)
+        self.assertIn("【抓回经过：规矩=加装双重门锁、禁止接触钥匙和门锁 后续=不启用】", prompt)
+        self.assertIn("催眠退行", prompt)
+        self.assertNotIn("hypnotic_regression", prompt)
+        self.assertNotIn("followup=", prompt)
 
     def test_hypnotic_regression_route_is_assistant_captor_only(self) -> None:
         from captivity_simulator.engine import _build_ending_seed, _finalize_preset_ending
@@ -273,9 +291,10 @@ class EngineTest(unittest.TestCase):
             run_command("schedule_escape_window day=1 hint=Partner出去了 bait=钥匙在玄关", captured_path)
             escaped = run_command("resolve_escape_choice escape", captured_path)
             prompt = build_assistant_prompt(escaped, config)
-            self.assertIn("hypnotic_regression", prompt)
             self.assertIn("催眠退行", prompt)
             self.assertIn("只记录后续关系走向，不规定正文内容", prompt)
+            self.assertNotIn("hypnotic_regression", prompt)
+            self.assertNotIn("followup=", prompt)
             submitted = run_command(
                 "submit_recapture_process rules=double_lock,key_isolation followup=hypnotic_regression || process='完整抓回经过。'",
                 captured_path,

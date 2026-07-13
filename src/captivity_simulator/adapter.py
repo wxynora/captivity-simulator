@@ -83,10 +83,10 @@ def request_assistant(prompt: str, config: dict[str, Any], player_message: str =
                     arguments = json.loads(str((function or {}).get("arguments") or "{}"))
                 except json.JSONDecodeError:
                     arguments = {}
-                result = get_reference(str((arguments or {}).get("category") or ""))
+                result = get_reference(str((arguments or {}).get("分类") or (arguments or {}).get("category") or ""))
             body["messages"].append({
                 "role": "tool",
                 "tool_call_id": str(tool_call.get("id") or ""),
-                "content": json.dumps(result, ensure_ascii=False),
+                "content": result,
             })
     raise AdapterError("AI exceeded the reference-tool round limit.")

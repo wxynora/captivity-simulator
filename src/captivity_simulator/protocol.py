@@ -4,6 +4,138 @@ import json
 import re
 import shlex
 
+from .engine import (
+    ACTION_CONTENTS,
+    ACTION_LABELS,
+    ACTION_RESPONSE_LABELS,
+    ESCAPE_CHOICE_LABELS,
+    INTERVENTION_INTENT_LABELS,
+    INTERVENTION_MODIFIER_LABELS,
+    NIGHT_ACTIONS,
+    NIGHT_DETAIL_OPTIONS,
+    RECAPTURE_FOLLOWUP_LABELS,
+    RECAPTURE_RULE_LABELS,
+    TOOL_LABELS,
+    TRAINING_CONTENTS,
+)
+
+
+def _reverse_labels(labels: dict[str, str]) -> dict[str, str]:
+    return {str(label): str(item_id) for item_id, label in labels.items()}
+
+
+_CONTENT_LABELS = {
+    content_id: label
+    for options in ACTION_CONTENTS.values()
+    for content_id, label in options.items()
+}
+_CHINESE_KEYS = {
+    "行动": "action",
+    "强度": "intensity",
+    "内容": "contents",
+    "调教": "training_contents",
+    "附加": "modifiers",
+    "道具": "tools",
+    "来源": "source",
+    "加料": "additive",
+    "告知": "disclosed",
+    "饮水": "water",
+    "回应": "response",
+    "心情": "mood",
+    "台词": "line",
+    "细节": "detail",
+    "日记": "note",
+    "介入": "intent",
+    "处理": "strategy",
+    "查看方式": "style",
+    "规矩": "rules",
+    "后续": "followup",
+    "书名": "book_title",
+    "彩蛋": "secret",
+}
+_CHINESE_VALUES = {
+    "action": {
+        **_reverse_labels(ACTION_LABELS),
+        **_reverse_labels(NIGHT_ACTIONS),
+        **_reverse_labels(RECAPTURE_FOLLOWUP_LABELS),
+    },
+    "intensity": {"低": "light", "中": "medium", "高": "heavy"},
+    "contents": _reverse_labels(_CONTENT_LABELS),
+    "training_contents": _reverse_labels(TRAINING_CONTENTS),
+    "modifiers": _reverse_labels(INTERVENTION_MODIFIER_LABELS),
+    "tools": _reverse_labels(TOOL_LABELS),
+    "source": {"自己做": "cook", "点外卖": "takeout"},
+    "additive": {"不加料": "none", "体液": "body_fluid", "精液": "body_fluid", "安眠": "fictional_sleep", "助兴": "fictional_arousal"},
+    "disclosed": {"明确告知": "told", "暗示": "hint", "隐瞒": "hidden"},
+    "water": {"不额外喂水": "none", "一杯水": "glass", "很多水": "lots"},
+    "response": _reverse_labels(ACTION_RESPONSE_LABELS),
+    "detail": {
+        str(label): str(detail_id)
+        for options in NIGHT_DETAIL_OPTIONS.values()
+        for detail_id, label in options.items()
+    },
+    "intent": _reverse_labels(INTERVENTION_INTENT_LABELS),
+    "strategy": {"看见但不说": "silent", "之后处理": "review_later", "当场介入": "intervene"},
+    "style": {"全程看": "full", "偶尔看": "occasional"},
+    "rules": _reverse_labels(RECAPTURE_RULE_LABELS),
+    "followup": {"不启用": "none", "催眠退行": "hypnotic_regression"},
+}
+_CHOICE_VALUES = {
+    "不看": "none",
+    "全程看": "full",
+    "偶尔看": "occasional",
+    "看见但不说": "silent",
+    "之后处理": "review_later",
+    "当场介入": "intervene",
+    "尝试逃跑": "escape",
+    "老实待着": "stay",
+}
+_INVENTORY_ALIASES = {
+    "书": "book",
+    "switch": "switch",
+    "日记本": "notebook",
+    "音乐播放器": "music_player",
+    "平板": "tablet",
+    "小夜灯": "night_light",
+    "抱枕": "pillow",
+    "呼叫铃": "call_bell",
+}
+
+
+def _quote_value(value: str) -> str:
+    return value if re.fullmatch(r"[^\s'\"]+", value) else shlex.quote(value)
+
+
+def _translate_args(text: str) -> str:
+    translated = str(text or "").strip().replace("＝", "=")
+    for chinese_key, internal_key in _CHINESE_KEYS.items():
+        translated = re.sub(rf"(?<!\S){re.escape(chinese_key)}\s*[=:：]", f"{internal_key}=", translated)
+    try:
+        tokens = shlex.split(translated)
+    except ValueError:
+        tokens = translated.split()
+    normalized: list[str] = []
+    for token in tokens:
+        if "=" not in token:
+            normalized.append(token)
+            continue
+        key, raw_value = token.split("=", 1)
+        mapping = _CHINESE_VALUES.get(key)
+        if mapping:
+            values = [item.strip() for item in re.split(r"[,，/|、]", raw_value) if item.strip()]
+            raw_value = ",".join(mapping.get(item, item) for item in values)
+        normalized.append(f"{key}={_quote_value(raw_value)}")
+    return " ".join(normalized)
+
+
+def _translate_segments(text: str) -> str:
+    return " || ".join(_translate_args(segment) for segment in str(text or "").split("||"))
+
+
+def _translate_bare_list(value: str, mapping: dict[str, str]) -> str:
+    items = [item.strip() for item in re.split(r"[,，、]", str(value or "")) if item.strip()]
+    return ",".join(mapping.get(item.lower(), mapping.get(item, item)) for item in items)
+
 
 def _pending(payload: dict) -> dict:
     for key in ("captor_view", "captive_view", "state"):
@@ -41,10 +173,11 @@ def _day_batch_command(reply_text: str, payload: dict) -> str:
     submitted: list[dict] = []
     for index, match in enumerate(matches):
         slot = int(match.group(1))
+        translated_fields = _translate_args(str(match.group(2) or "").strip())
         try:
-            tokens = shlex.split(str(match.group(2) or "").strip())
+            tokens = shlex.split(translated_fields)
         except ValueError:
-            tokens = str(match.group(2) or "").strip().split()
+            tokens = translated_fields.split()
         fields = {
             key.strip(): raw_value.strip()
             for token in tokens
@@ -106,10 +239,12 @@ def directive_to_command(reply_text: str, payload: dict | None = None) -> str:
     }
     if label in {"过程心情", "过程反应"}:
         process = _process_block(rest)
-        return f"submit_process_reaction {value} process={shlex.quote(process)}" if value and process else ""
+        args = _translate_args(value)
+        return f"submit_process_reaction {args} process={shlex.quote(process)}" if args and process else ""
     if label == "抓回经过":
         process = _process_block(rest)
-        return f"submit_recapture_process {value} || process={shlex.quote(process)}" if value and process else ""
+        args = _translate_args(value)
+        return f"submit_recapture_process {args} || process={shlex.quote(process)}" if args and process else ""
     if label in {"过程", "描述", "提交"}:
         if pending_type == "process_reaction_write":
             return ""
@@ -120,9 +255,9 @@ def directive_to_command(reply_text: str, payload: dict | None = None) -> str:
         return f"{action} {value}".strip()
     if label == "选择":
         if pending_type == "escape_choice":
-            return f"resolve_escape_choice {value}".strip()
+            return f"resolve_escape_choice {_CHOICE_VALUES.get(value, value)}".strip()
         if pending_type == "monitor_gate":
-            return f"view_monitor {value}".strip()
+            return f"view_monitor {_CHOICE_VALUES.get(value, value)}".strip()
         if pending_type == "bell_response_choice":
             if value in {"不过去", "不去", "skip", "none"}:
                 return "respond_bell choice=skip"
@@ -130,8 +265,23 @@ def directive_to_command(reply_text: str, payload: dict | None = None) -> str:
                 process = _process_block(rest)
                 return f"respond_bell choice=go process={shlex.quote(process)}" if process else ""
             return ""
-        return f"monitor_action {value}".strip()
+        return f"monitor_action {_translate_args(_CHOICE_VALUES.get(value, value))}".strip()
     action = direct.get(label)
+    if action in {"plan_day", "day_action"}:
+        value = _translate_segments(value)
+    elif action in {"respond_action", "night_action", "choose_recapture_followup"}:
+        value = _translate_args(value)
+    elif action == "view_monitor":
+        value = _CHOICE_VALUES.get(value, _translate_args(value))
+    elif action == "set_recapture_rules":
+        value = _translate_args(value) if "=" in value else "rules=" + _translate_bare_list(value, _CHINESE_VALUES["rules"])
+    elif action in {"gift_item", "revoke_item"}:
+        if value.startswith("items="):
+            value = _translate_args(value)
+        else:
+            item_text, _, args_text = value.partition(" ")
+            item_ids = _translate_bare_list(item_text, _INVENTORY_ALIASES)
+            value = f"items={item_ids} {_translate_args(args_text)}".strip()
     if action == "respond_action" and value and rest:
         value += f" feedback={shlex.quote(rest)}"
     return f"{action} {value}".strip() if action else ""

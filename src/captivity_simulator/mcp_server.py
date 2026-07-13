@@ -7,6 +7,8 @@ from typing import Any
 
 from .configuration import load_config, render_placeholders
 from .engine import run_command
+from .prompts import build_assistant_prompt
+from .protocol import directive_to_command
 from .projection import project_payload
 from .reference import get_reference, reference_tool_schema
 from .server import _save_path
@@ -54,9 +56,8 @@ def _tool_definition() -> dict[str, Any]:
     return {
         "name": TOOL_NAME,
         "description": (
-            "Read or advance the local Captivity Simulator save. Call status first, then submit exactly "
-            "one command allowed by the returned pending event. The rules engine owns state changes and "
-            "returns both human-readable text and structured state for the captive and captor views."
+            "读取或推进本地囚禁模拟器存档。先查询状态，再提交当前待处理事件允许的一条命令。"
+            "状态变化由规则引擎负责，并分别返回囚禁方与被囚禁方视图。"
         ),
         "inputSchema": {
             "type": "object",
@@ -64,13 +65,13 @@ def _tool_definition() -> dict[str, Any]:
                 "command": {
                     "type": "string",
                     "description": (
-                        "Rules-engine command, for example: status, new_game route=captured_by_assistant, "
-                        "plan_day ..., respond_action ..., submit_process ..., night_action ..., or view_monitor ..."
+                        "查询状态、开始新游戏，或直接提交当前中文方括号指令。"
+                        "为兼容自行接入的后端，也继续接受原始规则引擎命令。"
                     ),
                 },
                 "save_id": {
                     "type": "string",
-                    "description": "Local save identifier. Defaults to default.",
+                    "description": "本地存档标识，默认使用 default。",
                     "default": "default",
                 },
             },
@@ -91,7 +92,7 @@ def _reference_tool_definition() -> dict[str, Any]:
 
 def _configured_status(save_id: str) -> dict[str, Any]:
     payload = run_command("status", save_path=_save_path(save_id))
-    return render_placeholders(project_payload(payload, "assistant", include_commands=True, include_engine_text=True), load_config())
+    return render_placeholders(project_payload(payload, "assistant"), load_config())
 
 
 def _call_tool(params: Any) -> dict[str, Any]:
@@ -101,10 +102,10 @@ def _call_tool(params: Any) -> dict[str, Any]:
         arguments = body.get("arguments") or {}
         if not isinstance(arguments, dict):
             raise RpcError(-32602, "Invalid params: tool arguments must be an object")
-        reference = get_reference(str(arguments.get("category") or ""))
+        reference = get_reference(str(arguments.get("分类") or arguments.get("category") or ""))
         return {
-            "content": [{"type": "text", "text": _json_dump(reference)}],
-            "structuredContent": reference,
+            "content": [{"type": "text", "text": reference}],
+            "structuredContent": {"text": reference},
         }
     if name != TOOL_NAME:
         raise RpcError(-32602, f"Unknown tool: {name or '<missing>'}")
@@ -113,16 +114,22 @@ def _call_tool(params: Any) -> dict[str, Any]:
     if not isinstance(arguments, dict):
         raise RpcError(-32602, "Invalid params: tool arguments must be an object")
 
-    command = str(arguments.get("command") or "").strip()
-    if not command:
+    raw_command = str(arguments.get("command") or "").strip()
+    if not raw_command:
         raise RpcError(-32602, "Invalid params: command is required")
     save_id = str(arguments.get("save_id") or "default")
-    payload = run_command(command, save_path=_save_path(save_id))
-    projected = project_payload(payload, "assistant", include_commands=True, include_engine_text=True)
-    configured = render_placeholders(projected, load_config())
+    save_path = _save_path(save_id)
+    current = run_command("status", save_path=save_path)
+    command = directive_to_command(raw_command, current) or raw_command
+    payload = run_command(command, save_path=save_path)
+    config = load_config()
+    projected = project_payload(payload, "assistant")
+    configured = render_placeholders(projected, config)
+    prompt = build_assistant_prompt(payload, config) if configured.get("ok") else str(configured.get("text") or "")
+    visible_text = str(prompt or configured.get("text") or "").strip()
     result: dict[str, Any] = {
-        "content": [{"type": "text", "text": str(configured.get("text") or "")}],
-        "structuredContent": configured,
+        "content": [{"type": "text", "text": visible_text}],
+        "structuredContent": {"ok": bool(configured.get("ok")), "text": visible_text},
     }
     if configured.get("ok") is False:
         result["isError"] = True

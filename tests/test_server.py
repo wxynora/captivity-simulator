@@ -99,7 +99,14 @@ class ServerTest(unittest.TestCase):
                     json={"save_id": "batch", "command": "advance_day_action"},
                 ).get_json()
                 self.assertEqual(len(assistant_calls), 1)
-                self.assertEqual(third["state"]["pending_event"]["type"], "night_action_choice")
+                self.assertEqual(third["state"]["pending_event"]["type"], "advance_to_night")
+                self.assertEqual(third["state"]["phase"], "day")
+                night = client.post(
+                    "/api/game/command",
+                    json={"save_id": "batch", "command": "advance_day_action"},
+                ).get_json()
+                self.assertEqual(len(assistant_calls), 1)
+                self.assertEqual(night["state"]["pending_event"]["type"], "night_action_choice")
 
 
 if __name__ == "__main__":

@@ -19,9 +19,10 @@ class McpServerTest(unittest.TestCase):
             "jsonrpc": "2.0",
             "id": 2,
             "method": "tools/call",
-            "params": {"name": REFERENCE_TOOL_NAME, "arguments": {"category": "feeding"}},
+            "params": {"name": REFERENCE_TOOL_NAME, "arguments": {"分类": "喂食"}},
         })
-        self.assertIn("source", called["result"]["structuredContent"])
+        self.assertIn("来源：自己做、点外卖", called["result"]["structuredContent"]["text"])
+        self.assertEqual(called["result"]["content"][0]["text"], called["result"]["structuredContent"]["text"])
 
     def test_lists_simulator_tool(self) -> None:
         response = handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
@@ -52,11 +53,12 @@ class McpServerTest(unittest.TestCase):
         self.assertIsNotNone(response)
         result = response["result"]
         self.assertTrue(result["structuredContent"]["ok"])
-        self.assertEqual(result["structuredContent"]["state"]["route"], "captured_by_assistant")
-        self.assertEqual(result["structuredContent"]["state"]["viewer"], "captor")
-        self.assertIn("captor_view", result["structuredContent"])
-        self.assertNotIn("captive_view", result["structuredContent"])
-        self.assertTrue(result["content"][0]["text"])
+        visible = result["content"][0]["text"]
+        self.assertEqual(visible, result["structuredContent"]["text"])
+        self.assertIn("【今日安排：行动=", visible)
+        self.assertNotIn("action=", visible)
+        self.assertNotIn("day_plan_choice", visible)
+        self.assertNotIn("required_directive", visible)
 
     def test_mcp_projects_assistant_captive_view_on_captor_route(self) -> None:
         with tempfile.TemporaryDirectory() as directory, patch(
@@ -73,9 +75,38 @@ class McpServerTest(unittest.TestCase):
                 },
             })
         payload = response["result"]["structuredContent"]
-        self.assertEqual(payload["state"]["viewer"], "captive")
-        self.assertIn("captive_view", payload)
-        self.assertNotIn("captor_view", payload)
+        self.assertTrue(payload["ok"])
+        self.assertIn("你被", payload["text"])
+        self.assertNotIn("capture_assistant", payload["text"])
+
+    def test_mcp_accepts_current_chinese_directive(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "captivity_simulator.mcp_server._save_path",
+            side_effect=lambda save_id: Path(directory) / f"{save_id}.json",
+        ):
+            handle_request({
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "tools/call",
+                "params": {
+                    "name": TOOL_NAME,
+                    "arguments": {"command": "new_game route=captured_by_assistant", "save_id": "zh-directive"},
+                },
+            })
+            response = handle_request({
+                "jsonrpc": "2.0",
+                "id": 6,
+                "method": "tools/call",
+                "params": {
+                    "name": TOOL_NAME,
+                    "arguments": {
+                        "command": "【今日安排：行动=喂食 强度=中 || 行动=清洗 强度=低 || 行动=服从调教 强度=中 调教=口令服从】",
+                        "save_id": "zh-directive",
+                    },
+                },
+            })
+        self.assertTrue(response["result"]["structuredContent"]["ok"])
+        self.assertNotIn("action=", response["result"]["content"][0]["text"])
 
     def test_reads_default_save_resource(self) -> None:
         with tempfile.TemporaryDirectory() as directory, patch(
@@ -89,6 +120,7 @@ class McpServerTest(unittest.TestCase):
         payload = json.loads(response["result"]["contents"][0]["text"])
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["game_id"], "captivity_simulator")
+        self.assertNotIn("required_directive", json.dumps(payload, ensure_ascii=False))
 
 
 if __name__ == "__main__":
