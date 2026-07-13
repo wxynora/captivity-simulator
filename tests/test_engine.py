@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from captivity_simulator.configuration import render_placeholders
-from captivity_simulator.engine import _active_night_condition, _advance_after_day_event, _new_state, _resolve_event, run_command
+from captivity_simulator.engine import PET_CORE_RULES, _active_night_condition, _advance_after_day_event, _new_state, _normalize_pet_state, _resolve_event, run_command
 from captivity_simulator.prompts import build_assistant_prompt
 from captivity_simulator.protocol import directive_to_command
 from captivity_simulator.reference import get_reference, reference_tool_schema
@@ -43,6 +43,41 @@ class EngineTest(unittest.TestCase):
         self.assertEqual(second["captor_view"]["captor"], "user")
         self.assertEqual(second["captive_view"]["captive"], "assistant")
         self.assertFalse(unopened["state"]["started"])
+
+    def test_pet_route_centers_objectification_service_and_sexual_discipline(self) -> None:
+        config = {
+            "actors": {"user": "Player", "assistant": "Partner"},
+            "prompt": {"route_openings": {"captured_by_assistant": "opening"}},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            captured_path = Path(directory) / "captured.json"
+            run_command("new_game route=captured_by_assistant", captured_path)
+            captured = run_command(
+                "plan_day action=training training_contents=pet_play tools=collar || "
+                "action=punishment contents=pet_sexual_discipline modifiers=sex tools=collar || "
+                "action=cleaning",
+                captured_path,
+            )
+            captured_event = captured["captor_view"]["pending_event"]["event"]
+            self.assertTrue(set(PET_CORE_RULES).issubset(set(captured_event["pet_context"]["added_rules"])))
+            self.assertIn("不是可爱化装扮", captured_event["pet_context"]["focus"])
+            captured_prompt = build_assistant_prompt(captured, config)
+            self.assertIn("宠物线核心", captured_prompt)
+            self.assertIn("性服务与违令后的性惩戒", captured_prompt)
+
+            captive_path = Path(directory) / "captive.json"
+            run_command("new_game route=capture_assistant", captive_path)
+            captive = run_command(
+                "plan_day action=training training_contents=pet_objectification,pet_sexual_service,pet_sexual_discipline tools=collar || "
+                "action=feeding || action=cleaning",
+                captive_path,
+            )
+            captive_rules = captive["captive_view"]["pending_event"]["event"]["pet_context"]["active_rule_labels"]
+            self.assertIn("在调教或性行为中使用主人指定的物化自称并复述指定台词", captive_rules)
+            self.assertIn("按主人的口令以宠物身份提供性服务", captive_rules)
+
+        migrated = _normalize_pet_state({"active": True, "rules": ["designated_spot"]}, 2)
+        self.assertTrue(set(PET_CORE_RULES).issubset(set(migrated["rules"])))
 
     def test_placeholder_rendering_is_recursive(self) -> None:
         config = {"actors": {"user": "Player", "assistant": "Partner"}}

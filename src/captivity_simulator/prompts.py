@@ -86,6 +86,16 @@ def _current_event_lines(pending: dict[str, Any]) -> list[str]:
             str(action_response.get("line") or "").strip(),
         ]
         lines.append("已记录回应：" + " / ".join(item for item in response_bits if item))
+    pet_context = event.get("pet_context") if isinstance(event.get("pet_context"), dict) else {}
+    if pet_context:
+        focus = str(pet_context.get("focus") or "").strip()
+        if focus:
+            lines.append("宠物线核心：" + focus)
+        active_rules = [str(item) for item in pet_context.get("active_rule_labels") or [] if str(item).strip()]
+        if active_rules:
+            lines.append("宠物规矩：" + " / ".join(active_rules))
+        if pet_context.get("pending_violation"):
+            lines.append("已有待处理违令，可作为物化训诫或性惩戒的直接前因。")
     hint = str(pending.get("hint") or "").strip()
     bait = str(pending.get("bait") or "").strip()
     if hint or bait:

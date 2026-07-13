@@ -199,6 +199,8 @@ ACTION_CONTENTS = {
         "bondage_discipline": "束缚惩戒",
         "orgasm_denial": "禁止高潮",
         "toy_discipline": "玩具惩戒",
+        "pet_objectification_discipline": "宠物物化训诫",
+        "pet_sexual_discipline": "宠物性惩戒",
         "confiscation": "没收物品",
         "interrogation": "审问",
         "rule_escalation": "规则加码",
@@ -263,12 +265,18 @@ TRAINING_CONTENTS = {
     "pet_owner_address": "主人称呼训练",
     "pet_begging": "宠物式求欢",
     "pet_display": "宠物展示检查",
+    "pet_objectification": "口头物化训练",
+    "pet_sexual_service": "性服务训练",
+    "pet_sexual_discipline": "违令性惩戒",
     "toilet_control": "如厕控制",
     "assisted_urination": "抱着把尿",
 }
 CAPTIVE_ROUTE_ONLY_TRAINING = {"toilet_control", "assisted_urination"}
 PET_RULE_LABELS = {
     "collar_identity": "佩戴项圈并接受小狗身份",
+    "verbal_objectification": "在调教或性行为中使用主人指定的物化自称并复述指定台词",
+    "sexual_service": "按主人的口令以宠物身份提供性服务",
+    "sexual_discipline": "违令后接受以羞耻和性惩戒为主的处理",
     "designated_spot": "在指定位置等候",
     "crawl_on_command": "按口令爬行",
     "pet_feeding": "按宠物方式进食",
@@ -290,6 +298,9 @@ PET_TRAINING_RULES = {
     "pet_owner_address": "owner_address",
     "pet_begging": "pet_begging",
     "pet_display": "display_inspection",
+    "pet_objectification": "verbal_objectification",
+    "pet_sexual_service": "sexual_service",
+    "pet_sexual_discipline": "sexual_discipline",
     "leash_training": "leash_follow",
     "service_training": "service_on_command",
 }
@@ -303,8 +314,22 @@ PET_ACTIVATION_TRAINING = {
     "pet_owner_address",
     "pet_begging",
     "pet_display",
+    "pet_objectification",
+    "pet_sexual_service",
+    "pet_sexual_discipline",
 }
 PET_RELATED_TRAINING = set(PET_TRAINING_RULES)
+PET_CORE_RULES = (
+    "collar_identity",
+    "verbal_objectification",
+    "sexual_service",
+    "sexual_discipline",
+)
+PET_CORE_FOCUS = (
+    "宠物身份以深度物化、口头服从、性服务与违令后的性惩戒为核心，不是可爱化装扮。"
+    "具体经过中，要把宠物称呼、物化自称、复述主人指定的性服务与归属台词作为反复发生的互动；"
+    "违令优先成为羞耻训诫或性惩戒的前因。"
+)
 TOOL_LABELS = {
     "toy": "跳蛋",
     "vibrating_wand": "振动棒",
@@ -370,21 +395,21 @@ TOOL_CATEGORIES = {
     "feeding_spoon": "喂食",
 }
 TOOL_COMPATIBILITY = {
-    "toy": {"training:toy_training", "training:orgasm_control", "training:forced_orgasm", "training:masturbation_control", "content:toy_reward", "content:toy_discipline", "modifier:sex"},
-    "vibrating_wand": {"training:toy_training", "training:orgasm_control", "training:forced_orgasm", "training:masturbation_control", "content:toy_reward", "content:toy_discipline", "modifier:sex"},
-    "dildo": {"training:toy_training", "training:forced_orgasm", "content:toy_reward", "content:toy_discipline", "modifier:sex"},
+    "toy": {"training:toy_training", "training:orgasm_control", "training:forced_orgasm", "training:masturbation_control", "training:pet_sexual_service", "training:pet_sexual_discipline", "content:toy_reward", "content:toy_discipline", "content:pet_sexual_discipline", "modifier:sex"},
+    "vibrating_wand": {"training:toy_training", "training:orgasm_control", "training:forced_orgasm", "training:masturbation_control", "training:pet_sexual_service", "training:pet_sexual_discipline", "content:toy_reward", "content:toy_discipline", "content:pet_sexual_discipline", "modifier:sex"},
+    "dildo": {"training:toy_training", "training:forced_orgasm", "training:pet_sexual_service", "training:pet_sexual_discipline", "content:toy_reward", "content:toy_discipline", "content:pet_sexual_discipline", "modifier:sex"},
     "remote_control": {"training:toy_training", "training:orgasm_control", "training:forced_orgasm", "training:masturbation_control", "content:toy_reward", "content:toy_discipline"},
     "lubricant": {"training:toy_training", "training:anal_training", "training:forced_orgasm", "modifier:sex"},
-    "collar": {"training:obedience_commands", "training:position_training", "training:pet_play", "training:pet_position_wait", "training:pet_crawl_training", "training:pet_feeding", "training:pet_permission", "training:pet_voice_training", "training:pet_owner_address", "training:pet_begging", "training:pet_display", "training:leash_training", "training:service_training", "content:bondage_discipline", "content:restrained_rest", "modifier:sex"},
-    "leash": {"training:position_training", "training:pet_play", "training:pet_position_wait", "training:pet_crawl_training", "training:pet_begging", "training:pet_display", "training:leash_training", "training:service_training", "content:bondage_discipline"},
+    "collar": {"training:obedience_commands", "training:position_training", "training:pet_play", "training:pet_position_wait", "training:pet_crawl_training", "training:pet_feeding", "training:pet_permission", "training:pet_voice_training", "training:pet_owner_address", "training:pet_begging", "training:pet_display", "training:pet_objectification", "training:pet_sexual_service", "training:pet_sexual_discipline", "training:leash_training", "training:service_training", "content:bondage_discipline", "content:pet_objectification_discipline", "content:pet_sexual_discipline", "content:restrained_rest", "modifier:sex"},
+    "leash": {"training:position_training", "training:pet_play", "training:pet_position_wait", "training:pet_crawl_training", "training:pet_begging", "training:pet_display", "training:pet_objectification", "training:pet_sexual_service", "training:pet_sexual_discipline", "training:leash_training", "training:service_training", "content:bondage_discipline", "content:pet_objectification_discipline", "content:pet_sexual_discipline"},
     "handcuffs": {"training:bondage_training", "training:position_training", "training:sensory_deprivation", "training:exposure_training", "training:toilet_control", "training:assisted_urination", "content:bondage_discipline", "content:restrained_rest", "modifier:sex"},
     "ankle_cuffs": {"training:bondage_training", "training:position_training", "training:exposure_training", "training:toilet_control", "training:assisted_urination", "content:bondage_discipline", "content:restrained_rest", "modifier:sex"},
     "rope": {"training:bondage_training", "training:position_training", "training:exposure_training", "training:toilet_control", "training:assisted_urination", "content:bondage_discipline", "content:restrained_rest", "modifier:sex"},
     "bondage_tape": {"training:bondage_training", "training:sensory_deprivation", "training:toilet_control", "training:assisted_urination", "content:bondage_discipline", "content:restrained_rest", "modifier:sex"},
     "spreader_bar": {"training:bondage_training", "training:position_training", "training:exposure_training", "training:toilet_control", "training:assisted_urination", "content:bondage_discipline", "modifier:sex"},
     "blindfold": {"training:sensory_deprivation", "training:inspection_training", "content:sensitivity_check", "modifier:sex"},
-    "gag": {"training:obedience_commands", "training:sensory_deprivation", "training:humiliation_play", "training:pet_play", "training:pet_voice_training", "training:pet_begging", "training:pet_display", "modifier:sex"},
-    "muzzle": {"training:obedience_commands", "training:humiliation_play", "training:pet_play", "training:pet_voice_training", "training:pet_owner_address", "training:pet_begging"},
+    "gag": {"training:obedience_commands", "training:sensory_deprivation", "training:humiliation_play", "training:pet_play", "training:pet_voice_training", "training:pet_begging", "training:pet_display", "training:pet_objectification", "training:pet_sexual_service", "training:pet_sexual_discipline", "content:pet_objectification_discipline", "content:pet_sexual_discipline", "modifier:sex"},
+    "muzzle": {"training:obedience_commands", "training:humiliation_play", "training:pet_play", "training:pet_voice_training", "training:pet_owner_address", "training:pet_begging", "training:pet_objectification", "training:pet_sexual_service", "training:pet_sexual_discipline", "content:pet_objectification_discipline"},
     "whip": {"training:impact_play", "content:impact_discipline"},
     "flogger": {"training:impact_play", "content:impact_discipline"},
     "paddle": {"training:impact_play", "content:impact_discipline"},
@@ -410,6 +435,8 @@ ACTION_CONTENT_EFFECTS = {
     "bondage_discipline": {"stamina": -2, "shame": 3},
     "orgasm_denial": {"stamina": -1, "shame": 4},
     "toy_discipline": {"stamina": -3, "shame": 4},
+    "pet_objectification_discipline": {"stamina": -1, "shame": 5, "intimacy": 1},
+    "pet_sexual_discipline": {"stamina": -4, "cleanliness": -2, "shame": 6, "intimacy": 2},
     "interrogation": {"stamina": -1, "shame": 2},
     "embrace": {"stamina": 2, "shame": -1, "intimacy": 2},
     "massage": {"stamina": 3, "intimacy": 1},
@@ -449,6 +476,9 @@ TRAINING_CONTENT_EFFECTS = {
     "pet_owner_address": {"shame": 3, "intimacy": 2},
     "pet_begging": {"stamina": -2, "cleanliness": -1, "shame": 5, "intimacy": 2},
     "pet_display": {"stamina": -1, "shame": 4, "intimacy": 1},
+    "pet_objectification": {"stamina": -1, "shame": 5, "intimacy": 2},
+    "pet_sexual_service": {"stamina": -3, "cleanliness": -2, "shame": 5, "intimacy": 2},
+    "pet_sexual_discipline": {"stamina": -4, "cleanliness": -2, "shame": 6, "intimacy": 2},
     "toilet_control": {"stamina": -2, "shame": 4},
     "assisted_urination": {"stamina": -1, "cleanliness": -3, "shame": 6, "intimacy": 2},
 }
@@ -463,6 +493,8 @@ PROCESS_ACTION_CONTENTS = {
     "bondage_discipline",
     "orgasm_denial",
     "toy_discipline",
+    "pet_objectification_discipline",
+    "pet_sexual_discipline",
     "sensitivity_check",
     "chastity_check",
     "body_search",
@@ -1589,6 +1621,8 @@ def _normalize_pet_state(raw: Any, day: int) -> dict[str, Any]:
     except Exception:
         changed_day = day
     active = bool(data.get("active")) or bool(rules)
+    if active:
+        rules = list(dict.fromkeys([*PET_CORE_RULES, *rules]))
     return {
         "active": active,
         "rules": rules,
@@ -2291,7 +2325,7 @@ def _start_action_response(state: dict[str, Any], spec: dict[str, Any]) -> tuple
     else:
         prefix = ""
     if pending_type == "process_reaction_write":
-        return True, [prefix, f"第 {state['current_day']} 天白天行动 {state['day_action_count'] + 1} 已展示：{ACTION_LABELS.get(action, action)}。等待{assistant}一次提交反应、过程和心情。"]
+        return True, [prefix, f"第 {state['current_day']} 天白天行动 {state['day_action_count'] + 1} 已展示：{ACTION_LABELS.get(action, action)}。等待{{assistant}}一次提交反应、过程和心情。"]
     return True, [prefix, f"第 {state['current_day']} 天白天行动 {state['day_action_count'] + 1} 已展示：{ACTION_LABELS.get(action, action)}。等待被囚禁方选择接受/拒绝和心情。"]
 
 
@@ -3812,11 +3846,14 @@ def _pet_rule_ids_for_training(training_contents: list[str], *, active_before: b
     activates = bool(PET_ACTIVATION_TRAINING.intersection(training_contents))
     if not active_before and not activates:
         return []
-    return list(dict.fromkeys(
+    selected_rules = list(dict.fromkeys(
         PET_TRAINING_RULES[item]
         for item in training_contents
         if item in PET_TRAINING_RULES
     ))
+    if activates and not active_before:
+        return list(dict.fromkeys([*PET_CORE_RULES, *selected_rules]))
+    return selected_rules
 
 
 def _attach_pet_context(state: dict[str, Any], event: dict[str, Any]) -> None:
@@ -3840,6 +3877,7 @@ def _attach_pet_context(state: dict[str, Any], event: dict[str, Any]) -> None:
     current_rules = list(pet_state["rules"])
     future_rules = list(dict.fromkeys([*current_rules, *added_rules]))
     event["pet_context"] = {
+        "focus": PET_CORE_FOCUS,
         "active_before": bool(pet_state["active"]),
         "establishes_identity": activates and not bool(pet_state["active"]),
         "current_rules": current_rules,
@@ -3964,12 +4002,19 @@ def _pet_night_rule_prompt(state: dict[str, Any]) -> str:
         return ""
     labels = [PET_RULE_LABELS[item] for item in pet_state["rules"]]
     prefix = "今晚仍被当作主人的小狗看管。"
+    prefix += PET_CORE_FOCUS
     if labels:
         prefix += "当前规矩：" + "、".join(labels) + "。"
     if "designated_spot" in pet_state["rules"]:
         prefix += "若不在指定位置等候且监控被打开，会留下违令记录。"
     if "owner_address" in pet_state["rules"]:
         prefix += "开口时要使用主人指定的称呼。"
+    if "verbal_objectification" in pet_state["rules"]:
+        prefix += "调教或性行为中要使用主人指定的物化自称，并按要求复述主人希望听见的台词。"
+    if "sexual_service" in pet_state["rules"]:
+        prefix += "主人发出性服务口令时，需要按宠物规矩回应。"
+    if "sexual_discipline" in pet_state["rules"]:
+        prefix += "留下违令后，后续处理会优先围绕物化训诫或性惩戒展开。"
     if "pet_begging" in pet_state["rules"]:
         prefix += "想索取性行为时，只能按宠物规矩摆好姿势再求主人。"
     if "display_inspection" in pet_state["rules"]:
@@ -4526,12 +4571,12 @@ def _status_profile(state: dict[str, Any]) -> dict[str, Any]:
     pet_state = _normalize_pet_state(state.get("pet_state"), int(state.get("current_day") or 1))
     if pet_state["active"]:
         rule_labels = [PET_RULE_LABELS[item] for item in pet_state["rules"]]
-        prompt = "当前处于小狗身份。"
+        prompt = "当前处于小狗身份。" + PET_CORE_FOCUS
         if rule_labels:
             prompt += "现有规矩：" + "、".join(rule_labels) + "。"
         flags.append({"id": "pet_identity_active", "label": "小狗身份中", "prompt": prompt})
     if int(pet_state["pending_violations"]) > 0:
-        flags.append({"id": "pet_violation_pending", "label": "有待处理违令", "prompt": "已有宠物规矩违令，可在后续奖励、惩戒或调教中处理。"})
+        flags.append({"id": "pet_violation_pending", "label": "有待处理违令", "prompt": "已有宠物规矩违令，后续行为会继续收到这条记录，并可围绕物化训诫或性惩戒处理。"})
     bladder = _normalize_bladder_state(state.get("bladder"), int(state.get("current_day") or 1))
     bladder_pressure = int(bladder["pressure"])
     if bladder_pressure:
