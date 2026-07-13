@@ -2546,7 +2546,7 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
 
   const eventLog = useMemo(() => view.event_log || [], [view.event_log]);
   const latestEvent = eventLog[eventLog.length - 1];
-  const currentEvent = pending ? pending.event : latestEvent;
+  const currentEvent = pending?.event || latestEvent;
   const availableNightActions = view.available_night_actions?.length
     ? view.available_night_actions
     : pending?.available_actions?.length
@@ -3883,7 +3883,6 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
           ) : (
             <HistoryPanel
               events={eventLog}
-              lastText={lastText}
               detail={historyDetail}
               onOpenDetail={setHistoryDetail}
               onCloseDetail={() => setHistoryDetail(null)}
@@ -6044,6 +6043,8 @@ function RuntimePanel({
   const petRulePrompt = view.status_flags?.find((item) => item.id === "pet_identity_active")?.prompt || "";
   const activeTitle = isNightSelfChoice
     ? "你的安排"
+    : pendingType === "advance_action" && role === "captor"
+      ? "{assistant}的回应"
     : pendingType === "recapture_rules_choice"
       ? "重新立规矩"
     : pendingType === "recapture_followup_choice"
@@ -6113,6 +6114,8 @@ function RuntimePanel({
             <div className="event-main">
               {pendingType === "escape_choice" && waitingForAssistant
                 ? "逃跑诱导已经送达{assistant}。"
+                : pendingType === "advance_action" && role === "captor"
+                  ? event.action_response?.line || `{assistant}选择了${event.action_response?.response_label || "回应"}。`
                 : isRecaptureDecision
                   ? pendingLabel(pending, role)
                 : event.line || event.action_label || publicDirectiveText(pending?.required_directive, pending, role) || (isEnding ? "30 天闭环已完成，等待结局。" : "等待下一段事件。")}
@@ -7064,13 +7067,11 @@ function StatusRecoveryBar({
 
 function HistoryPanel({
   events,
-  lastText,
   detail,
   onOpenDetail,
   onCloseDetail,
 }: {
   events: CaptivityEvent[];
-  lastText: string;
   detail: CaptivityEvent | null;
   onOpenDetail: (event: CaptivityEvent) => void;
   onCloseDetail: () => void;
@@ -7160,7 +7161,7 @@ function HistoryPanel({
       )) : (
           <div className="action-card faded">
             <div className="uppercase pink-text" style={{ marginBottom: 5 }}>暂无回顾</div>
-            <div className="event-sub">{lastText || "还没有保存具体经过。"}</div>
+            <div className="event-sub">还没有保存具体经过。</div>
           </div>
       )}
     </>
