@@ -1714,6 +1714,16 @@ function shouldResumeGame(payload: CaptivityPayload): boolean {
   return hasMeaningfulProgress(view);
 }
 
+function isWaitingForAssistantDayPlan(payload: CaptivityPayload | null): boolean {
+  if (payloadRoute(payload) !== "captured_by_assistant") return false;
+  const view = viewFromPayload(payload);
+  const pending = view.pending_event;
+  return String(view.phase || "day") === "day"
+    && !(view.day_plan || []).length
+    && String(pending?.type || "") === "day_plan_choice"
+    && String(pending?.actor || "") === "assistant";
+}
+
 const COMMAND_ARG_PATTERN = /\b(?:action|intensity|intent|modifiers|tools|contents|training_contents|source|additive|response|mood|line|day|hint|bait)=/;
 
 const PENDING_LABELS: Record<string, string> = {
@@ -1853,13 +1863,13 @@ async function syncCaptivityToAssistant(
       body: JSON.stringify({ save_id: SAVE_ID, mode, message, user_initiated: userInitiated }),
     });
     if (!payload?.ok && !["applied", "applied_with_warning"].includes(String(payload?.sync_result || ""))) {
-      throw new Error(payload?.message || payload?.error || "同步{assistant}失败");
+      throw new Error(payload?.message || payload?.error || payload?.player_text || "同步{assistant}失败");
     }
     return payload;
   } catch (e) {
     const maybePayload = e instanceof ApiError ? e.payload : null;
-    if (maybePayload?.state || maybePayload?.captive_view || maybePayload?.captor_view) {
-      return maybePayload as CaptivityPayload;
+    if (maybePayload) {
+      throw new Error(maybePayload.message || maybePayload.error || maybePayload.player_text || "同步{assistant}失败");
     }
     throw e;
   }
@@ -2740,6 +2750,29 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
         lastSceneKeyRef.current = String(refreshedView.scene_copy?.key || "");
       }
       applyPayload(next);
+      if (isWaitingForAssistantDayPlan(next)) {
+        const message = "{assistant}的安排还没有写入存档。";
+        lastFailedRetryRef.current = () => {
+          void runWithWait(
+            "正在等待{assistant}写下今天的安排...",
+            "STATUS: WAITING_FOR_DAY_PLAN",
+            async () => {
+              const synced = await syncCaptivityToAssistant("state_update", "", true);
+              if (isWaitingForAssistantDayPlan(synced)) throw new Error(message);
+              return synced;
+            },
+          );
+        };
+        setHasFailedRetry(true);
+        setWait({
+          visible: true,
+          title: "安排尚未完成",
+          detail: message,
+          error: message,
+        });
+        setScreen("game");
+        return;
+      }
       if (!silent) {
         lastFailedRetryRef.current = null;
         setHasFailedRetry(false);
@@ -2771,7 +2804,7 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
         error: message,
       });
     }
-  }, [applyPayload, previewRole]);
+  }, [applyPayload, previewRole, runWithWait]);
 
   function retryLastFailedOperation() {
     lastFailedRetryRef.current?.();
@@ -2873,17 +2906,41 @@ export function CaptivitySimulatorGameTab({ onBack }: { onBack: () => void }) {
       setPlanSlots(defaultPlanSlots());
       return;
     }
+    if (nextRoute === "captured_by_assistant") {
+      let initialized = false;
+      const startCapturedRoute = async () => {
+        if (!initialized) {
+          const created = await executeCaptivityCommand("new_game route=captured_by_assistant");
+          initialized = true;
+          applyPayload(created);
+        }
+        const next = await syncCaptivityToAssistant("state_update", "", true);
+        if (isWaitingForAssistantDayPlan(next)) {
+          throw new Error(next.player_text || next.message || next.error || "{assistant}的安排还没有写入存档。");
+        }
+        setScreen("game");
+        setFooterTab("status");
+        setPlanSlots(defaultPlanSlots());
+        return next;
+      };
+      void runWithWait(
+        "正在等待{assistant}写下今天的安排...",
+        "STATUS: WAITING_FOR_DAY_PLAN",
+        startCapturedRoute,
+      );
+      return;
+    }
     void runWithWait(
       "正在建立囚禁档案...",
       "STATUS: INITIALIZING ROUTE",
-      () => executeCaptivityCommand(`new_game route=${nextRoute}`),
-    ).then((next) => {
-      if (!next) return;
-      setScreen("game");
-      setFooterTab("status");
-      setPlanSlots(defaultPlanSlots());
-      continueAutomaticSync(next, false, true);
-    });
+      async () => {
+        const next = await executeCaptivityCommand("new_game route=capture_assistant");
+        setScreen("game");
+        setFooterTab("status");
+        setPlanSlots(defaultPlanSlots());
+        return next;
+      },
+    );
   }
 
   function returnToSelector() {

@@ -54,6 +54,56 @@ class ServerTest(unittest.TestCase):
         self.assertIn("captor_view", captor)
         self.assertNotIn("captive_view", captor)
 
+    def test_initial_captive_plan_persists_and_plain_refresh_recovers_first_action(self) -> None:
+        app = create_app()
+
+        def fake_assistant(_prompt: str, _config: dict, player_message: str = "") -> str:
+            return "【今日安排：行动=喂食 强度=低 || 行动=清洗 强度=低 || 行动=看管休息 强度=低 内容=安静待着】"
+
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "captivity_simulator.server._save_path",
+            side_effect=lambda save_id: Path(directory) / f"{save_id}.json",
+        ), patch("captivity_simulator.server.request_assistant", side_effect=fake_assistant):
+            with app.test_client() as client:
+                client.post(
+                    "/api/game/command",
+                    json={"save_id": "initial", "command": "new_game route=captured_by_assistant"},
+                )
+                synced = client.post("/api/game/sync-assistant", json={"save_id": "initial"})
+                refreshed = client.post(
+                    "/api/game/command",
+                    json={"save_id": "initial", "command": "status"},
+                )
+        self.assertEqual(synced.status_code, 200)
+        self.assertEqual(synced.get_json()["state"]["pending_event"]["type"], "action_response")
+        self.assertEqual(refreshed.status_code, 200)
+        self.assertEqual(refreshed.get_json()["state"]["pending_event"]["type"], "action_response")
+        self.assertEqual(refreshed.get_json()["state"]["pending_event"]["event"]["action"], "feeding")
+
+    def test_rejected_initial_plan_returns_error_and_stays_pending(self) -> None:
+        app = create_app()
+
+        def fake_assistant(_prompt: str, _config: dict, player_message: str = "") -> str:
+            return "【今日安排：行动=喂食 强度=低 || 行动=清洗 强度=低 || 行动=看管休息 强度=低 内容=安静独处】"
+
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "captivity_simulator.server._save_path",
+            side_effect=lambda save_id: Path(directory) / f"{save_id}.json",
+        ), patch("captivity_simulator.server.request_assistant", side_effect=fake_assistant):
+            with app.test_client() as client:
+                client.post(
+                    "/api/game/command",
+                    json={"save_id": "rejected", "command": "new_game route=captured_by_assistant"},
+                )
+                synced = client.post("/api/game/sync-assistant", json={"save_id": "rejected"})
+                refreshed = client.post(
+                    "/api/game/command",
+                    json={"save_id": "rejected", "command": "status"},
+                )
+        self.assertEqual(synced.status_code, 400)
+        self.assertFalse(synced.get_json()["ok"])
+        self.assertEqual(refreshed.get_json()["state"]["pending_event"]["type"], "day_plan_choice")
+
     def test_capture_assistant_day_batch_uses_one_assistant_sync(self) -> None:
         app = create_app()
         assistant_calls: list[str] = []
@@ -272,6 +322,19 @@ class ServerTest(unittest.TestCase):
         self.assertIn("gift_item", gift_block)
         self.assertNotIn("continueAutomaticSync", gift_block)
         self.assertIn("note=${quoteArg(note)}", gift_block)
+
+    def test_route_startup_keeps_captive_loading_and_never_syncs_captor(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "web" / "src" / "CaptivitySimulator.tsx").read_text(encoding="utf-8")
+        start_block = source.split("function startRoute", 1)[1].split("function returnToSelector", 1)[0]
+        self.assertIn('if (nextRoute === "captured_by_assistant")', start_block)
+        self.assertIn("startCapturedRoute", start_block)
+        self.assertIn('syncCaptivityToAssistant("state_update", "", true)', start_block)
+        self.assertNotIn("syncInitialAssistantDayPlan", source)
+        self.assertIn('executeCaptivityCommand("new_game route=capture_assistant")', start_block)
+        captor_start = start_block.split('executeCaptivityCommand("new_game route=capture_assistant")', 1)[1]
+        self.assertNotIn("syncCaptivityToAssistant", captor_start)
+        self.assertIn("isWaitingForAssistantDayPlan(next)", source)
+        self.assertIn("STATUS: WAITING_FOR_DAY_PLAN", source)
 
     def test_assistant_reply_cannot_advance_a_user_owned_pending(self) -> None:
         def payload(route: str, pending_type: str, actor: str, *, inventory: dict | None = None) -> dict:
