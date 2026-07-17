@@ -229,4 +229,6 @@ cd web && npm run build
 
 ## License
 
-代码与项目视觉素材使用 [MIT](LICENSE)。`web/src/assets/cookie-regular.ttf` 为 Cookie 字体，使用 [SIL Open Font License 1.1](web/src/assets/OFL.txt)。详情见 [ASSETS.md](ASSETS.md)。
+代码与项目自有视觉素材使用 [PolyForm Noncommercial License 1.0.0](LICENSE)，仅允许非商业用途。商业使用不在许可范围内，必须另行取得版权方书面授权。
+
+`web/src/assets/cookie-regular.ttf` 为 Cookie 字体，继续使用 [SIL Open Font License 1.1](web/src/assets/OFL.txt)。详情见 [ASSETS.md](ASSETS.md)。
